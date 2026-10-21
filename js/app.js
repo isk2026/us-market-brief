@@ -4,7 +4,7 @@
   const U = window.UMB;
   const { $, $$, esc, state, store, KEYS } = U;
 
-  const ROUTES = ['dashboard', 'global', 'news', 'calendar'];
+  const ROUTES = ['dashboard', 'global', 'semi', 'news', 'calendar'];
   const REFRESH_MS = 5 * 60 * 1000;
   let currentView = null;
 

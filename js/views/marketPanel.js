@@ -344,6 +344,8 @@
       rootEl.querySelectorAll('[data-cross],[data-dot]').forEach((el) => el.classList.add('hidden'));
     };
     const onMove = (e) => {
+      // Charts with their own hover handling (e.g. multi-series lines) opt out of this layer.
+      if (e.target.closest('[data-own-hover]')) return;
       const sp = e.target.closest('[data-spark]');
       if (sp) {
         const s = sparks.get(sp.dataset.spark);
