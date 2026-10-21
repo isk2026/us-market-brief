@@ -462,6 +462,12 @@ const GLOBAL_INDICES = [
   { key: 'sp500', symbol: '^GSPC', name: 'S&P 500', nameEn: 'S&P 500', region: 'americas', country: 'US' },
   { key: 'nasdaq', symbol: '^IXIC', name: '나스닥 종합', nameEn: 'NASDAQ Composite', region: 'americas', country: 'US' },
   { key: 'dow', symbol: '^DJI', name: '다우존스', nameEn: 'Dow Jones Industrial Average', region: 'americas', country: 'US' },
+  { key: 'ndx', symbol: '^NDX', name: '나스닥 100', nameEn: 'NASDAQ-100', region: 'americas', country: 'US' },
+  { key: 'rut', symbol: '^RUT', name: '러셀 2000', nameEn: 'Russell 2000', region: 'americas', country: 'US' },
+  { key: 'sox', symbol: '^SOX', name: '필라델피아 반도체', nameEn: 'PHLX Semiconductor (SOX)', region: 'americas', country: 'US' },
+  // CME E-mini futures (front month) trade ~23h a day, so they show overnight moves before the US cash open.
+  { key: 'es', symbol: 'ES=F', name: 'S&P 500 선물', nameEn: 'E-mini S&P 500 Futures', region: 'americas', country: 'US', futures: true },
+  { key: 'nq', symbol: 'NQ=F', name: '나스닥 100 선물', nameEn: 'E-mini Nasdaq-100 Futures', region: 'americas', country: 'US', futures: true },
 ];
 const localDate = (ms, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 

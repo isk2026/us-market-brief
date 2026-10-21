@@ -15,7 +15,7 @@
     { symbol: 'SPY', name: 'S&P 500' },
     { symbol: 'QQQ', name: '나스닥 100' },
     { symbol: 'DIA', name: '다우존스' },
-    { symbol: 'IWM', name: '러셀 2000' },
+    { symbol: 'IWM', name: '러셀' },
   ];
   const MAJOR = new Set(['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'GOOG', 'AMZN', 'META', 'TSLA', 'AVGO', 'BRK.B',
     'JPM', 'V', 'MA', 'LLY', 'UNH', 'XOM', 'WMT', 'NFLX', 'COST', 'ORCL']);

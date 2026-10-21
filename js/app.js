@@ -4,7 +4,7 @@
   const U = window.UMB;
   const { $, $$, esc, state, store, KEYS } = U;
 
-  const ROUTES = ['dashboard', 'global', 'semi', 'news', 'calendar'];
+  const ROUTES = ['dashboard', 'global', 'macro', 'sector', 'semi', 'news', 'calendar'];
   const REFRESH_MS = 5 * 60 * 1000;
   let currentView = null;
 
@@ -107,7 +107,7 @@
   };
 
   // ---------- header ----------
-  // Oil (futures when available, else lagged spot) and Bitcoin from UMB.state.market, after the index ETFs.
+  // Oil (futures when available, else lagged spot) and Bitcoin from UMB.state.market, after the indices.
   function marketQuotes() {
     const m = state.market;
     if (!m) return [];
@@ -129,25 +129,47 @@
     return out;
   }
 
+  // US index chips show real index levels from the global-indices snapshot (js/marketData.js).
+  // Only when an index is missing there do we fall back to its ETF quote, labelled as an ETF so the
+  // two price scales (S&P 500 ≈ 7,700 vs SPY ≈ 670) can't be confused.
+  const TICKER_INDICES = [
+    { key: 'sp500', name: 'S&P 500', etf: 'SPY' },
+    { key: 'nasdaq', name: '나스닥', etf: 'QQQ' },
+    { key: 'dow', name: '다우', etf: 'DIA' },
+    { key: 'rut', name: '러셀', etf: 'IWM' },
+  ];
+  function indexQuotes() {
+    const items = (state.market && state.market.globalIndices && state.market.globalIndices.items) || [];
+    return TICKER_INDICES.map((t) => {
+      const i = items.find((x) => x.key === t.key);
+      if (i && i.price != null) {
+        return { name: t.name, price: i.price, change: i.changePct, title: `${i.nameEn || t.name} 지수 · ${i.sessionDate || ''} 현지 기준` };
+      }
+      const etf = state.quotes.find((q) => q.symbol === t.etf);
+      return etf ? { name: `${t.name} ETF`, price: etf.price, change: etf.change, prefix: '$',
+        title: `${t.etf} ETF 가격${state.source === 'live' ? '' : ' · 샘플'}` } : null;
+    }).filter(Boolean);
+  }
+
   const priceText = (v) => (v >= 10000
     ? Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
-    : Number(v).toFixed(2));
+    : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
   function renderTicker() {
     const el = $('#ticker');
-    const all = [...state.quotes, ...marketQuotes()];
+    const all = [...indexQuotes(), ...marketQuotes()];
     if (!all.length) { el.innerHTML = ''; return; }
     el.innerHTML = all.map((q) => {
       const up = q.change >= 0;
       const cls = up ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
       const change = q.change == null || Number.isNaN(q.change) ? '' : `<span class="font-mono ${cls}">${up ? '+' : ''}${Number(q.change).toFixed(2)}%</span>`;
-      return `<div class="flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 dark:border-slate-800"${q.title ? ` title="${esc(q.title)}"` : ''}>
+      return `<div class="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 dark:border-slate-800" title="${esc(q.title || (q.symbol ? `${q.name} · ${q.symbol}` : q.name))}">
         <span class="text-slate-500">${esc(q.name)}</span>
-        <span class="font-mono font-medium">${q.symbol ? `${esc(q.symbol)} ` : ''}${esc(q.prefix || '')}${priceText(q.price)}</span>
+        <span class="font-mono font-medium">${esc(q.prefix || '')}${priceText(q.price)}</span>
         ${change}
       </div>`;
     }).join('') + (state.updatedAt
-      ? `<span class="ml-auto shrink-0 self-center text-xs text-slate-400">업데이트 ${new Date(state.updatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>`
+      ? `<span class="ml-auto hidden shrink-0 self-center text-xs text-slate-400 2xl:inline">업데이트 ${new Date(state.updatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>`
       : '');
   }
 

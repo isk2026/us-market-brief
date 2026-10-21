@@ -47,6 +47,8 @@
       <nav id="nav" class="no-scrollbar flex flex-1 gap-1 overflow-x-auto text-sm">
         <a data-route="dashboard" href="#/dashboard" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">대시보드</a>
         <a data-route="global" href="#/global" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">글로벌 증시</a>
+        <a data-route="macro" href="#/macro" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">채권·금리·환율·원자재</a>
+        <a data-route="sector" href="#/sector" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">섹터 ETF</a>
         <a data-route="semi" href="#/semi" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">반도체</a>
         <a data-route="news" href="#/news" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">뉴스 및 지표 요약</a>
         <a data-route="calendar" href="#/calendar" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">경제지표·실적 캘린더</a>
@@ -81,7 +83,7 @@
       var v = Date.now();
       [
         'js/core.js', 'js/finnhub.js', 'js/marketData.js', 'js/mockData.js', 'js/data.js', 'js/api.js',
-        'js/views/marketPanel.js', 'js/views/dashboard.js', 'js/views/news.js', 'js/views/calendar.js', 'js/views/global.js', 'js/views/semi.js', 'js/app.js',
+        'js/views/marketPanel.js', 'js/views/riskSensor.js', 'js/views/premarket.js', 'js/views/dashboard.js', 'js/views/news.js', 'js/views/calendar.js', 'js/views/global.js', 'js/views/macro.js', 'js/views/sector.js', 'js/views/semi.js', 'js/app.js',
       ].forEach(function (src) { document.write('<script src="' + src + '?v=' + v + '"><\/script>'); });
     })();
   </script>

@@ -1,6 +1,6 @@
 /*
  * 글로벌 증시 view: KOSPI · KOSDAQ · Nikkei · Hang Seng · Shanghai · TAIEX · STOXX 600 · Euro STOXX 50 ·
- * FTSE 100 · DAX · CAC 40 · S&P 500 · Nasdaq · Dow.
+ * FTSE 100 · DAX · CAC 40 · S&P 500 · Nasdaq · Dow · Nasdaq-100 · SOX · S&P 500 / Nasdaq-100 futures.
  * Data: UMB.state.market.globalIndices (js/marketData.js, built by scripts/fetch-market-data.mjs from
  * Yahoo Finance; KOSPI/KOSDAQ official closes from Bank of Korea ECOS via the morning-briefing skill).
  * Charts reuse UMB.charts (sparkline + hover layer from marketPanel.js).
@@ -21,7 +21,7 @@
     kospi: ['09:00', '15:30'], kosdaq: ['09:00', '15:30'], nikkei: ['09:00', '15:30'], hangseng: ['09:30', '16:00'],
     shanghai: ['09:30', '15:00'], taiex: ['09:00', '13:30'], stoxx600: ['09:00', '17:30'], eurostoxx50: ['09:00', '17:30'],
     ftse: ['08:00', '16:30'], dax: ['09:00', '17:30'], cac: ['09:00', '17:30'], sp500: ['09:30', '16:00'],
-    nasdaq: ['09:30', '16:00'], dow: ['09:30', '16:00'],
+    nasdaq: ['09:30', '16:00'], dow: ['09:30', '16:00'], ndx: ['09:30', '16:00'], sox: ['09:30', '16:00'],
   };
   const PERIODS = [['1W', 7], ['1M', 30], ['3M', 91]];
 
@@ -44,7 +44,20 @@
   }
 
   // Exchange schedule status right now (snapshot prices may be older — the card shows their timestamp).
+  // CME Globex equity futures (ES, NQ): Sun 18:00 → Fri 17:00 ET with a daily 17:00–18:00 ET halt.
+  function futuresStatus() {
+    const now = localParts('America/New_York');
+    const open = { label: '거래 중 (24h)', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300', open: true };
+    const closed = (label) => ({ label, cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300', open: false });
+    if (now.weekday === 'Sat') return closed('휴장 (주말)');
+    if (now.weekday === 'Sun') return now.hm >= '18:00' ? open : closed('휴장 · 일 18:00 ET 개장');
+    if (now.hm >= '17:00' && now.hm < '18:00') return closed('일일 정산 휴장');
+    if (now.weekday === 'Fri' && now.hm >= '17:00') return closed('휴장 (주말)');
+    return open;
+  }
+
   function status(item) {
+    if (item.futures) return futuresStatus();
     const hours = HOURS[item.key];
     if (!hours || !item.tz) return null;
     const now = localParts(item.tz);
@@ -116,7 +129,7 @@
         <span class="text-2xl leading-none" aria-hidden="true">${FLAGS[i.country] || '🏳'}</span>
         <div class="min-w-0 flex-1">
           <h3 class="truncate font-bold leading-tight">${esc(i.name)}</h3>
-          <p class="truncate text-[11px] text-slate-400">${esc(i.nameEn || i.symbol)} · ${esc(i.currency || '')}</p>
+          <p class="truncate text-[11px] text-slate-400">${i.futures ? '<span class="mr-1 rounded bg-violet-100 px-1 font-semibold text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">선물 · 근월물</span>' : ''}${esc(i.nameEn || i.symbol)} · ${esc(i.currency || '')}</p>
         </div>
         ${st ? `<span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}">${st.open ? '<span class="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 align-middle"></span>' : ''}${st.label}</span>` : ''}
       </div>

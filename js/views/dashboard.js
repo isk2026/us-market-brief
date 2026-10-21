@@ -1,4 +1,4 @@
-/* Dashboard view: KPIs, top news, next key event countdown, week schedule, major-company earnings (upcoming / reported). */
+/* Dashboard view: risk sensor, briefing, market panel, KPIs, top news, next key event countdown, week schedule, pre-market movers, major-company earnings. */
 (function () {
   'use strict';
   const { $, esc, ui, state, dateKey, addDays, todayKey, EVENT_TYPES, SESSIONS,
@@ -284,8 +284,12 @@
   function render(container) {
     unmount();
     const ev = nextKeyEvent();
+    // Optional components: skip gracefully if a script failed to load.
+    const risk = window.UMB.riskSensor;
+    const pre = window.UMB.premarket;
     container.innerHTML = `
       ${banners()}
+      ${risk ? risk.html() : ''}
       ${briefingCard()}
       ${window.UMB.marketPanel.html()}
       ${kpis()}
@@ -293,8 +297,11 @@
         ${topNews()}
         <div class="space-y-6">${nextEventCard(ev)}${weekSchedule()}</div>
       </div>
+      ${pre ? pre.html() : ''}
       ${earningsCard()}`;
     window.UMB.marketPanel.mount(container);
+    if (risk) risk.mount(container);
+    if (pre) pre.mount(container);
     earnRoot = container;
     earnRoot.addEventListener('click', onEarnClick);
 
@@ -311,6 +318,8 @@
 
   function unmount() {
     window.UMB.marketPanel.unmount();
+    if (window.UMB.riskSensor) window.UMB.riskSensor.unmount();
+    if (window.UMB.premarket) window.UMB.premarket.unmount();
     if (earnRoot) { earnRoot.removeEventListener('click', onEarnClick); earnRoot = null; }
     if (timer) { clearInterval(timer); timer = null; }
   }

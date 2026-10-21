@@ -217,7 +217,7 @@
       { symbol: 'SPY', name: 'S&P 500', price: 668.42, change: 0.54 },
       { symbol: 'QQQ', name: '나스닥 100', price: 602.15, change: 0.87 },
       { symbol: 'DIA', name: '다우존스', price: 462.3, change: -0.12 },
-      { symbol: 'IWM', name: '러셀 2000', price: 243.08, change: -0.95 },
+      { symbol: 'IWM', name: '러셀', price: 243.08, change: -0.95 },
     ];
   }
 
