@@ -77,6 +77,14 @@ const SKILL_TAG = 'via multi-asset-morning-briefing';
 
 // Runs `python -I market_data.py <subcommand> ...args` and returns its parsed JSON (ok:true) or throws.
 async function runSkill(subcommand, args = []) {
+  const json = await execSkill(subcommand, args);
+  if (!json.ok) throw new Error(`${subcommand}: ${json.error?.message || json.message || 'ok:false'}`);
+  if (!Array.isArray(json.rows) || !json.rows.length) throw new Error(`${subcommand}: no rows`);
+  return json;
+}
+
+// Raw JSON from the skill helper (the `snapshot` command returns an envelope without ok/rows).
+async function execSkill(subcommand, args = []) {
   await access(SKILL_PY).catch(() => { throw new Error(`skill helper not found: ${SKILL_PY}`); });
   const stdout = await new Promise((resolve, reject) => {
     execFile(PYTHON, ['-I', SKILL_PY, subcommand, ...args], {
@@ -90,11 +98,7 @@ async function runSkill(subcommand, args = []) {
       else resolve(out);
     });
   });
-  let json;
-  try { json = JSON.parse(stdout); } catch { throw new Error(`${subcommand}: non-JSON output`); }
-  if (!json.ok) throw new Error(`${subcommand}: ${json.error?.message || json.message || 'ok:false'}`);
-  if (!Array.isArray(json.rows) || !json.rows.length) throw new Error(`${subcommand}: no rows`);
-  return json;
+  try { return JSON.parse(stdout); } catch { throw new Error(`${subcommand}: non-JSON output`); }
 }
 
 // Try the skill first; on any failure use the direct fetcher and record why.
@@ -442,6 +446,88 @@ async function fetchEarnings() {
 }
 
 // ---------- main ----------
+// ---- Global equity indices (Yahoo Finance; KOSPI/KOSDAQ official closes via the skill's ECOS snapshot) ----
+const GLOBAL_INDICES = [
+  { key: 'kospi', symbol: '^KS11', name: '코스피', nameEn: 'KOSPI', region: 'asia', country: 'KR' },
+  { key: 'kosdaq', symbol: '^KQ11', name: '코스닥', nameEn: 'KOSDAQ', region: 'asia', country: 'KR' },
+  { key: 'nikkei', symbol: '^N225', name: '닛케이 225', nameEn: 'Nikkei 225', region: 'asia', country: 'JP' },
+  { key: 'hangseng', symbol: '^HSI', name: '항셍', nameEn: 'Hang Seng', region: 'asia', country: 'HK' },
+  { key: 'shanghai', symbol: '000001.SS', name: '상하이 종합', nameEn: 'SSE Composite', region: 'asia', country: 'CN' },
+  { key: 'taiex', symbol: '^TWII', name: '대만 가권', nameEn: 'TAIEX', region: 'asia', country: 'TW' },
+  { key: 'stoxx600', symbol: '^STOXX', name: 'STOXX 600', nameEn: 'STOXX Europe 600', region: 'europe', country: 'EU' },
+  { key: 'eurostoxx50', symbol: '^STOXX50E', name: '유로 STOXX 50', nameEn: 'EURO STOXX 50', region: 'europe', country: 'EU' },
+  { key: 'ftse', symbol: '^FTSE', name: '영국 FTSE 100', nameEn: 'FTSE 100', region: 'europe', country: 'GB' },
+  { key: 'dax', symbol: '^GDAXI', name: '독일 DAX', nameEn: 'DAX', region: 'europe', country: 'DE' },
+  { key: 'cac', symbol: '^FCHI', name: '프랑스 CAC 40', nameEn: 'CAC 40', region: 'europe', country: 'FR' },
+  { key: 'sp500', symbol: '^GSPC', name: 'S&P 500', nameEn: 'S&P 500', region: 'americas', country: 'US' },
+  { key: 'nasdaq', symbol: '^IXIC', name: '나스닥 종합', nameEn: 'NASDAQ Composite', region: 'americas', country: 'US' },
+  { key: 'dow', symbol: '^DJI', name: '다우존스', nameEn: 'Dow Jones Industrial Average', region: 'americas', country: 'US' },
+];
+const localDate = (ms, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+
+async function yahooIndex(def) {
+  const json = await fetchJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(def.symbol)}?range=1y&interval=1d`);
+  const r = json?.chart?.result?.[0];
+  if (!r) throw new Error(`Yahoo ${def.symbol}: ${json?.chart?.error?.description || 'no result'}`);
+  const m = r.meta || {};
+  const tz = m.exchangeTimezoneName || 'UTC';
+  const closes = r.indicators?.quote?.[0]?.close || [];
+  const byDate = new Map(); // one point per exchange-local trading date (the live bar can repeat the last date)
+  (r.timestamp || []).forEach((t, i) => { if (closes[i] != null) byDate.set(localDate(t * 1000, tz), round(closes[i])); });
+  const price = m.regularMarketPrice;
+  if (price == null || !m.regularMarketTime) throw new Error(`Yahoo ${def.symbol}: no regularMarketPrice`);
+  const sessionDate = localDate(m.regularMarketTime * 1000, tz);
+  byDate.set(sessionDate, round(price)); // the latest quote is this session's value
+  const series = [...byDate].map(([date, close]) => ({ date, close })).sort((a, b) => a.date.localeCompare(b.date));
+  // Previous SESSION close (meta.chartPreviousClose is the close before the 1y range, not yesterday).
+  const prev = [...series].reverse().find((p) => p.date < sessionDate);
+  const prevClose = prev ? prev.close : null;
+  return {
+    ...def, currency: m.currency || null, tz,
+    price: round(price), prevClose,
+    change: prevClose == null ? null : round(price - prevClose),
+    changePct: prevClose == null ? null : round(((price - prevClose) / prevClose) * 100),
+    marketTime: new Date(m.regularMarketTime * 1000).toISOString(), sessionDate,
+    series,
+  };
+}
+
+// Official KOSPI/KOSDAQ closes from Bank of Korea ECOS, read through the skill's `snapshot` command.
+async function ecosOfficialCloses() {
+  const briefingDate = localDate(Date.now(), 'Asia/Seoul');
+  const json = await execSkill('snapshot', ['--briefing-date', briefingDate]);
+  const out = {};
+  for (const it of json.items || []) {
+    if ((it.symbol === 'KOSPI' || it.symbol === 'KOSDAQ') && it.value != null) {
+      out[it.symbol.toLowerCase()] = { date: it.observed || it.session, close: it.value, source: `한국은행 ECOS (${SKILL_TAG})` };
+    }
+  }
+  if (!Object.keys(out).length) throw new Error('snapshot: no KOSPI/KOSDAQ observation');
+  return out;
+}
+
+async function fetchGlobalIndices() {
+  const [results, official] = await Promise.all([
+    mapLimit(GLOBAL_INDICES, 4, yahooIndex),
+    ecosOfficialCloses().catch((err) => ({ __error: err.message })),
+  ]);
+  const items = [];
+  results.forEach((r, i) => {
+    const def = GLOBAL_INDICES[i];
+    if (!r.ok) { extraErrors[`globalIndices.${def.key}`] = r.error?.message || String(r.error); return; }
+    const off = official[def.key];
+    items.push(off ? { ...r.value, official: off } : r.value);
+  });
+  if (!items.length) throw new Error('all global index fetches failed');
+  return {
+    asOf: new Date().toISOString(),
+    source: 'Yahoo Finance',
+    url: 'https://finance.yahoo.com/markets/world-indices/',
+    ...(official.__error ? { note: `ECOS official close unavailable: ${official.__error}` } : {}),
+    items,
+  };
+}
+
 async function readPrevious() {
   try {
     const sandbox = { window: {} };
@@ -460,6 +546,7 @@ const SECTIONS = {
   aaii: fetchAaii,
   earnings: fetchEarnings,
   crypto: fetchCrypto,
+  globalIndices: fetchGlobalIndices,
 };
 
 function latestLabel(key, s) {
@@ -486,6 +573,12 @@ function latestLabel(key, s) {
       const reported = s.items.filter((it) => it.epsActual != null).length;
       return `${s.items.length} items · ${reported} w/ actual · next: ${upcoming.join(', ')}`;
     }
+    case 'globalIndices': {
+      const pick = ['kospi', 'nikkei', 'stoxx600', 'sp500'].map((k) => s.items.find((it) => it.key === k)).filter(Boolean);
+      const off = s.items.filter((it) => it.official).length;
+      return `${s.items.length} indices · ` + pick.map((it) => `${it.nameEn} ${it.price}${it.changePct == null ? '' : ` (${it.changePct > 0 ? '+' : ''}${it.changePct}%)`}`).join(' · ')
+        + ` · ECOS ${off ? `${off} official` : 'n/a'}`;
+    }
     default: return '';
   }
 }
@@ -503,7 +596,7 @@ async function main() {
     if (r.status === 'fulfilled') {
       data[key] = r.value;
       ok++;
-      summary.push({ section: key, status: r.value.note && key !== 'earnings' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
+      summary.push({ section: key, status: r.value.note && key !== 'earnings' && key !== 'globalIndices' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
       return;
     }
     const message = r.reason?.message || String(r.reason);
@@ -520,7 +613,7 @@ async function main() {
   data.errors = errors;
 
   const body = `/* generated by scripts/fetch-market-data.mjs — do not edit. Regenerate: node scripts/fetch-market-data.mjs */\n`
-    + `window.MARKET_DATA = ${JSON.stringify(data, null, 2)};\n`;
+    + `window.MARKET_DATA = ${JSON.stringify(data)};\n`;
   await writeFile(OUT, body, 'utf8');
 
   console.table(summary);

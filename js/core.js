@@ -69,7 +69,8 @@
     inline: { label: '예상 부합', text: '', badge: 'bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-300' },
   };
   function surprise(ev) {
-    const num = (v) => { const m = String(v ?? '').match(/[-+]?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : NaN; };
+    // Strip currency/grouping first so "-$0.12" parses as -0.12 (not 0.12).
+    const num = (v) => { const m = String(v ?? '').replace(/[$,\s]/g, '').match(/[-+]?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : NaN; };
     const a = num(ev.actual), f = num(ev.forecast);
     if (Number.isNaN(a) || Number.isNaN(f)) return null;
     return SURPRISES[a > f ? 'beat' : a < f ? 'miss' : 'inline'];
@@ -152,6 +153,21 @@
     sentiment: (s) => { const x = SENTIMENTS[s] || SENTIMENTS.neutral; return `<span class="text-xs font-medium ${x.cls}">${x.icon} ${x.label}</span>`; },
     importance: (i) => { const x = IMPORTANCE[i] || IMPORTANCE.Medium; return ui.badge(i === 'High' ? `🔥 ${x.label}` : x.label, x.cls); },
     importanceCard: (i) => (IMPORTANCE[i] || IMPORTANCE.Medium).card,
+    // Earnings result badge: Surprise (beat) / Miss / In line, with icon + label + % (never color alone).
+    // Uses Finnhub's surprisePercent when present, else computes it from actual vs forecast EPS.
+    surpriseBadge: (ev) => {
+      if (!ev || !ev.actual) return '';
+      const s = surprise(ev);
+      if (!s) return '';
+      const num = (v) => { const m = String(v ?? '').replace(/[$,\s]/g, '').match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : NaN; };
+      const a = num(ev.actual), f = num(ev.forecast);
+      const pct = ev.surprisePct != null ? Number(ev.surprisePct) : (f ? ((a - f) / Math.abs(f)) * 100 : null);
+      const pctText = pct == null || Number.isNaN(pct) ? '' : ` ${pct > 0 ? '+' : pct < 0 ? '−' : '±'}${Math.abs(pct).toFixed(1)}%`;
+      const kind = s === SURPRISES.beat ? ['▲', 'Surprise'] : s === SURPRISES.miss ? ['▼', 'Miss'] : ['■', 'In line'];
+      return `<span class="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${s.badge}"
+        title="실제 EPS ${esc(ev.actual)} · 예상 ${esc(ev.forecast ?? '-')}${ev.surpriseSource === 'finnhub' ? ' · Finnhub Earnings Surprises' : ''}">
+        <span aria-hidden="true">${kind[0]}</span>${kind[1]}${pctText}</span>`;
+    },
     // Warning chip when the market snapshot (js/marketData.js) is older than `hours`.
     staleSnapshot: (iso, hours = 30) => {
       const age = iso ? (Date.now() - Date.parse(iso)) / 3600e3 : Infinity;

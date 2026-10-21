@@ -1,12 +1,16 @@
 /*
  * Data loading. Without an API key the app runs on sample data; with a Finnhub key it pulls
- * live news, earnings calendar and ETF quotes. Economic/Fed/holiday events always come from
- * the sample generator because Finnhub's economic calendar is a premium endpoint.
+ * live news, the earnings calendar (+ earnings surprises for reported companies) and ETF quotes
+ * through the rate-limited, cached client in js/finnhub.js. Economic/Fed/holiday events always
+ * come from the sample generator because Finnhub's economic calendar is a premium endpoint.
  */
 (function () {
   'use strict';
-  const { state, store, KEYS, dateKey, addDays, eventDate, earningsId } = window.UMB;
-  const BASE = 'https://finnhub.io/api/v1';
+  const { state, dateKey, addDays, eventDate, earningsId } = window.UMB;
+  // All Finnhub traffic goes through UMB.finnhub (key handling, rate limit, cache, error mapping).
+  const fh = (path, params, opts) => window.UMB.finnhub.get(path, params, opts);
+  const TTL = { news: 5 * 60e3, calendar: 30 * 60e3, quote: 60e3, surprise: 12 * 3600e3 };
+  const SURPRISE_LOOKUPS = 20; // reported companies checked per load (free tier: 60 calls/min)
   const QUOTE_SYMBOLS = [
     { symbol: 'SPY', name: 'S&P 500' },
     { symbol: 'QQQ', name: '나스닥 100' },
@@ -27,14 +31,6 @@
   const NEGATIVE = /\b(falls?|drops?|plunges?|slumps?|miss(es)?|loss(es)?|declines?|downgrades?|fears?|slides?|tumbles?|sinks?|weak|cuts? jobs|layoffs?|warns?|concerns?)\b/gi;
 
   const HIGH_IMPACT = /\b(fed|fomc|powell|cpi|inflation|jobs report|payrolls?|recession|tariffs?|record high|plunges?|soars?|crash|sell-?off)\b/i;
-
-  async function fh(path, params, token) {
-    const url = new URL(`${BASE}/${path}`);
-    Object.entries({ ...params, token }).forEach(([k, v]) => url.searchParams.set(k, v));
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Finnhub ${path} ${res.status}`);
-    return res.json();
-  }
 
   function classify(text) {
     for (const [cat, re] of CATEGORY_RULES) if (re.test(text)) return cat;
@@ -92,6 +88,7 @@
         detail: `${r.symbol}${quarter} 분기 실적 발표${session ? ` (${session === 'bmo' ? '장 시작 전' : '장 마감 후'})` : ''}.`,
         forecast: r.epsEstimate != null ? `$${Number(r.epsEstimate).toFixed(2)}` : undefined,
         actual: r.epsActual != null ? `$${Number(r.epsActual).toFixed(2)}` : undefined,
+        dataSource: 'finnhub',
       };
     });
   }
@@ -136,35 +133,76 @@
     state.source = 'sample';
   }
 
-  // Live-mode earnings. The Nasdaq snapshot (major companies, in sample.events()) stays the base: Finnhub's
-  // free calendar can come back empty or partial, which used to wipe every earnings event. Finnhub only
-  // fills in actual EPS for matching events (same earningsId) and adds companies the snapshot lacks.
-  function mergeEarnings(baseEvents, liveEarnings) {
+  // Live-mode earnings. Inside Finnhub's queried range its real-time calendar is authoritative (date,
+  // session, estimate, actual); the Nasdaq snapshot only contributes company name and market cap.
+  // Outside that range — or when Finnhub returns nothing, which the free tier sometimes does — the
+  // snapshot stays as is, so earnings never disappear. Sample (mock) earnings are dropped whenever
+  // real data exists.
+  function mergeEarnings(baseEvents, liveEarnings, from, to) {
     const hasSnapshot = !!(window.MARKET_DATA && window.MARKET_DATA.earnings && window.MARKET_DATA.earnings.items?.length);
-    // Without a snapshot the base earnings are illustrative samples — prefer real Finnhub data when there is any.
-    const dropBase = !hasSnapshot && liveEarnings.length > 0;
-    const live = new Map(liveEarnings.map((e) => [e.id, e]));
-    const merged = baseEvents
-      .filter((e) => !(dropBase && e.type === 'earnings'))
-      .map((e) => {
-        const l = e.type === 'earnings' && live.get(e.id);
-        if (!l) return e;
-        live.delete(e.id);
-        return { ...e, actual: e.actual || l.actual, forecast: e.forecast || l.forecast, session: e.session || l.session };
-      });
-    // Same company reported on a different date by the two sources → keep the snapshot's entry only.
-    const tickers = new Set(merged.filter((e) => e.type === 'earnings').map((e) => e.ticker));
-    return [...merged, ...[...live.values()].filter((e) => !tickers.has(e.ticker))];
+    if (!liveEarnings.length) return baseEvents;
+    const liveByTicker = new Map(liveEarnings.map((e) => [e.ticker, e]));
+    const out = [];
+    for (const e of baseEvents) {
+      if (e.type !== 'earnings') { out.push(e); continue; }
+      if (!hasSnapshot) continue; // illustrative sample earnings → replaced by real data
+      const l = liveByTicker.get(e.ticker);
+      const inRange = e.date >= from && e.date <= to;
+      if (l && inRange) {
+        // Finnhub wins; keep the snapshot's richer descriptive fields.
+        liveByTicker.delete(e.ticker);
+        out.push({ ...l, company: e.company, marketCap: e.marketCap, title: e.title, detail: e.detail,
+          importance: Math.max(e.importance, l.importance), previous: e.previous });
+      } else {
+        out.push(e);
+      }
+    }
+    return [...out, ...liveByTicker.values()];
   }
 
-  async function loadLive(token) {
+  // Earnings Surprises (stock/earnings): last 4 quarters of { actual, estimate, period, surprisePercent }.
+  // Matched to a reported event by fiscal period: the latest period ending before the report date
+  // (within ~4 months). Only reported events are looked up, most important first, cached 12h.
+  async function applySurprises(events) {
+    const now = Date.now();
+    const horizon = now - 14 * 86400e3;
+    const reported = events
+      .filter((e) => e.type === 'earnings' && e.ticker && eventDate(e).getTime() <= now && eventDate(e).getTime() >= horizon)
+      .sort((a, b) => Number(window.UMB.isWatched(b.ticker)) - Number(window.UMB.isWatched(a.ticker))
+        || (b.marketCap || 0) - (a.marketCap || 0) || b.importance - a.importance)
+      .slice(0, SURPRISE_LOOKUPS);
+    const usd = (v) => `${v < 0 ? '-' : ''}$${Math.abs(v).toFixed(2)}`;
+    const results = await Promise.allSettled(reported.map(async (e) => {
+      const rows = await fh('stock/earnings', { symbol: e.ticker }, { ttl: TTL.surprise, priority: -1 });
+      if (!Array.isArray(rows)) return;
+      const reportTs = Date.parse(`${e.date}T00:00:00Z`);
+      const match = rows
+        .filter((r) => r.period && r.actual != null)
+        .map((r) => ({ r, gap: reportTs - Date.parse(`${r.period}T00:00:00Z`) }))
+        .filter((x) => x.gap >= 0 && x.gap <= 125 * 86400e3)
+        .sort((a, b) => a.gap - b.gap)[0];
+      if (!match) return;
+      const r = match.r;
+      e.actual = usd(r.actual);
+      if (r.estimate != null) e.forecast = usd(r.estimate);
+      e.surprisePct = r.surprisePercent != null ? r.surprisePercent
+        : (r.estimate ? ((r.actual - r.estimate) / Math.abs(r.estimate)) * 100 : null);
+      e.surpriseSource = 'finnhub';
+      e.fiscalPeriod = r.period;
+    }));
+    const failed = results.filter((x) => x.status === 'rejected');
+    if (failed.length) console.warn(`[UMB] earnings surprises: ${failed.length}/${results.length} lookups failed`, failed[0].reason && failed[0].reason.code);
+    return { checked: reported.length, matched: reported.filter((e) => e.surpriseSource === 'finnhub').length };
+  }
+
+  async function loadLive() {
     const today = new Date();
     const from = dateKey(addDays(today, -7));
     const to = dateKey(addDays(today, 30));
     const [newsRaw, earn, quoteRaw] = await Promise.all([
-      fh('news', { category: 'general' }, token),
-      fh('calendar/earnings', { from, to }, token),
-      Promise.all(QUOTE_SYMBOLS.map((q) => fh('quote', { symbol: q.symbol }, token).catch(() => null))),
+      fh('news', { category: 'general' }, { ttl: TTL.news, priority: 2 }),
+      fh('calendar/earnings', { from, to }, { ttl: TTL.calendar, priority: 2 }),
+      Promise.all(QUOTE_SYMBOLS.map((q) => fh('quote', { symbol: q.symbol }, { ttl: TTL.quote, priority: 1 }).catch(() => null))),
     ]);
 
     const news = (Array.isArray(newsRaw) ? newsRaw : []).slice(0, 60).map(normalizeNews)
@@ -176,7 +214,9 @@
     }).filter(Boolean);
 
     state.news = news;
-    state.events = mergeEarnings(window.UMB.sample.events(), earnings).sort((a, b) => eventDate(a) - eventDate(b));
+    const events = mergeEarnings(window.UMB.sample.events(), earnings, from, to);
+    state.surpriseStats = await applySurprises(events);
+    state.events = events.sort((a, b) => eventDate(a) - eventDate(b));
     state.quotes = quotes.length ? quotes : window.UMB.sample.quotes();
     state.briefing = buildBriefing();
     state.source = 'live';
@@ -251,16 +291,17 @@
     // a shallow copy so live overrides (Bitcoin) never mutate window.MARKET_DATA.
     const snapshot = window.MARKET_DATA || window.MOCK_MARKET || null;
     state.market = snapshot ? { ...snapshot } : null;
-    const token = store.get(KEYS.apiKey);
+    state.surpriseStats = null;
     try {
       const crypto = refreshCrypto();
-      if (token) await loadLive(token);
+      if (window.UMB.finnhub.hasKey()) await loadLive();
       else useSample();
       await crypto;
     } catch (err) {
-      console.error('[UMB] live load failed', err);
+      // FinnhubError messages are Korean and never contain the key (see js/finnhub.js).
+      console.error('[UMB] live load failed', err && err.code, err && err.message);
       useSample();
-      state.error = '실시간 데이터를 불러오지 못해 샘플 데이터를 표시합니다. API 키와 네트워크를 확인하세요.';
+      state.error = `실시간 데이터를 불러오지 못해 샘플 데이터를 표시합니다. ${err && err.code ? err.message : 'API 키와 네트워크를 확인하세요.'}`;
     } finally {
       state.loading = false;
       state.updatedAt = Date.now();

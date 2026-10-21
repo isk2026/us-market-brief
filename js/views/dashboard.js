@@ -194,10 +194,7 @@
         <a href="https://www.nasdaq.com/market-activity/stocks/${encodeURIComponent(String(e.ticker || '').toLowerCase())}/earnings"
           target="_blank" rel="noopener noreferrer" class="ml-1 text-xs text-indigo-600 underline decoration-dotted dark:text-indigo-400">결과 보기 ↗</a>`;
     }
-    const s = window.UMB.surprise(e);
-    const pct = e.surprisePct != null ? `${e.surprisePct > 0 ? '+' : ''}${Number(e.surprisePct).toFixed(1)}%` : '';
-    return `<span class="font-mono font-semibold">${esc(e.actual)}</span>
-      ${s ? `<span class="ml-1 text-xs font-medium ${s.text}">${s.label}${pct ? ` ${esc(pct)}` : ''}</span>` : ''}`;
+    return `<span class="inline-flex items-center gap-1.5"><span class="font-mono font-semibold">${esc(e.actual)}</span>${ui.surpriseBadge(e)}</span>`;
   }
 
   function earningsRow(e, reported) {

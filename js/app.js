@@ -4,7 +4,7 @@
   const U = window.UMB;
   const { $, $$, esc, state, store, KEYS } = U;
 
-  const ROUTES = ['dashboard', 'news', 'calendar'];
+  const ROUTES = ['dashboard', 'global', 'news', 'calendar'];
   const REFRESH_MS = 5 * 60 * 1000;
   let currentView = null;
 
@@ -228,22 +228,36 @@
 
   // ---------- settings ----------
   function openSettings() {
-    const key = store.get(KEYS.apiKey, '') || '';
+    const fhc = U.finnhub;
+    const saved = fhc.getKey();
+    // The saved key is never written back into the DOM — only a masked hint.
+    const savedHint = saved ? `저장된 키 ••••${saved.slice(-4)} · 비워 두면 그대로 유지` : '비워두면 샘플 데이터 사용';
+    const s = fhc.stats();
+    const liveInfo = state.source === 'live'
+      ? `실시간 연결됨 · 호출 ${s.calls}회 · 캐시 ${s.cacheHits}회 · 전송 방식 ${s.authMode === 'header' ? '헤더' : 'URL 파라미터'}${state.surpriseStats ? ` · 실적 서프라이즈 ${state.surpriseStats.matched}/${state.surpriseStats.checked}건 매칭` : ''}`
+      : '';
     U.openModal(`
       <div class="mb-5 flex items-center justify-between">
         <h2 class="text-lg font-bold">설정</h2>
         <button data-action="close-modal" class="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800">✕</button>
       </div>
       <form id="settings-form" class="space-y-5">
-        <label class="block">
-          <span class="text-sm font-medium">Finnhub API 키</span>
-          <input name="apiKey" type="password" autocomplete="off" value="${esc(key)}" placeholder="비워두면 샘플 데이터 사용"
-            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-800" />
-          <span class="mt-1 block text-xs text-slate-500">
-            <a href="https://finnhub.io/register" target="_blank" rel="noopener" class="text-indigo-600 underline dark:text-indigo-400">finnhub.io</a>에서 무료 키를 발급받을 수 있습니다.
-            키는 이 브라우저(localStorage)에만 저장됩니다. 실시간: 뉴스·실적 일정·지수 ETF 시세 / 경제지표 일정은 샘플.
-          </span>
-        </label>
+        <div>
+          <label for="fh-key" class="text-sm font-medium">Finnhub API 키</label>
+          <div class="mt-1 flex gap-2">
+            <input id="fh-key" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${esc(savedHint)}"
+              class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-800" />
+            <button type="button" id="fh-test" class="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">연결 테스트</button>
+          </div>
+          <p id="fh-status" role="status" class="mt-1 min-h-[1.25rem] text-xs ${liveInfo ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}">${esc(liveInfo)}</p>
+          ${saved ? '<button type="button" id="fh-clear" class="text-xs text-rose-600 underline decoration-dotted dark:text-rose-400">저장된 키 삭제</button>' : ''}
+          <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-slate-800/60">
+            <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline dark:text-indigo-400">finnhub.io</a>에서 무료 키를 발급받을 수 있습니다.
+            실시간: 뉴스 · 실적 일정 · 실적 서프라이즈 · 지수 ETF 시세 (경제지표 일정은 샘플).<br>
+            🔒 키는 이 브라우저(localStorage)에만 저장되고 Finnhub에만 전송됩니다. 화면·로그·캐시에 남기지 않으며 다른 서버로 보내지 않습니다.
+            다만 브라우저 앱 특성상 이 기기에 접근할 수 있는 사람은 키를 볼 수 있으니, <b>공용 PC에서는 저장하지 말고</b> 무료 키만 사용하세요.
+          </div>
+        </div>
         <label class="block">
           <span class="text-sm font-medium">관심 종목 (쉼표로 구분)</span>
           <input name="watchlist" value="${esc(state.watchlist.join(', '))}" placeholder="AAPL, NVDA, MSFT"
@@ -254,11 +268,49 @@
           <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">저장</button>
         </div>
       </form>`);
+    const statusEl = $('#fh-status');
+    const setStatus = (msg, tone) => {
+      statusEl.textContent = msg;
+      statusEl.className = `mt-1 min-h-[1.25rem] text-xs ${tone === 'ok' ? 'text-emerald-600 dark:text-emerald-400'
+        : tone === 'err' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'}`;
+    };
+    $('#fh-test').addEventListener('click', async (e) => {
+      const candidate = $('#fh-key').value.trim() || fhc.getKey();
+      if (!candidate) { setStatus('테스트할 키를 입력하세요.', 'err'); return; }
+      e.currentTarget.disabled = true;
+      setStatus('연결 확인 중…');
+      try {
+        const r = await fhc.verifyKey(candidate);
+        setStatus(r.message, r.ok ? 'ok' : 'err');
+      } finally {
+        e.currentTarget.disabled = false;
+      }
+    });
+    const clearBtn = $('#fh-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        fhc.clearKey();
+        fhc.clearCache();
+        U.closeModal();
+        U.toast('API 키를 삭제했습니다 · 샘플 데이터로 전환');
+        refresh(false);
+      });
+    }
     $('#settings-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const newKey = String(fd.get('apiKey') || '').trim();
-      if (newKey) store.set(KEYS.apiKey, newKey); else store.remove(KEYS.apiKey);
+      // Empty input keeps the saved key; a new key is format-checked before it is stored.
+      if (newKey) {
+        try {
+          fhc.setKey(newKey);
+          fhc.clearCache();
+        } catch (err) {
+          setStatus(err.message || 'API 키 형식이 올바르지 않습니다.', 'err');
+          $('#fh-key').focus();
+          return;
+        }
+      }
       state.watchlist = [...new Set(String(fd.get('watchlist') || '')
         .split(/[,\s]+/).map((t) => t.trim().toUpperCase()).filter(Boolean))];
       store.set(KEYS.watchlist, state.watchlist);

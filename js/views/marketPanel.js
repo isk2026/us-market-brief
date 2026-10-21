@@ -12,7 +12,6 @@
   const sparks = new Map(); // id → { points:[{date,v}], label, fmt }
   let seq = 0;
   let root = null;
-  let tip = null;
   let handlers = null;
 
   const lastOf = (a) => (a && a.length ? a[a.length - 1] : null);
@@ -323,29 +322,27 @@
         <div id="crypto-slot" class="contents">${cryptoCard(m.crypto)}</div>
         ${fearGreedCard(m.fearGreed)}${aaiiCard(m.aaii)}
       </div>
-      <div id="mk-tip" role="tooltip" class="pointer-events-none fixed z-50 hidden max-w-xs rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-white dark:text-slate-900"></div>
+      <div id="mk-tip" data-chart-tip role="tooltip" class="pointer-events-none fixed z-50 hidden max-w-xs rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-white dark:text-slate-900"></div>
     </div>`;
   }
 
   // ---------- hover layer (crosshair + tooltip on sparklines, per-mark tooltip on [data-tip]) ----------
-  function showTip(text, e) {
-    tip.textContent = text;
-    tip.classList.remove('hidden');
-    const r = tip.getBoundingClientRect();
-    const left = Math.min(window.innerWidth - r.width - 8, Math.max(8, e.clientX - r.width / 2));
-    tip.style.left = `${left}px`;
-    tip.style.top = `${Math.max(8, e.clientY - r.height - 12)}px`;
-  }
-  function hideAll() {
-    if (tip) tip.classList.add('hidden');
-    root?.querySelectorAll('[data-cross],[data-dot]').forEach((el) => el.classList.add('hidden'));
-  }
-
-  function mount(container) {
-    unmount();
-    root = container.querySelector('#market-panel');
-    if (!root) return;
-    tip = root.querySelector('#mk-tip');
+  // Generic: any view can call attachChartHover(rootEl) after rendering sparkline()/[data-tip] marks
+  // inside rootEl (it needs one [data-chart-tip] element there). Returns a detach function.
+  function attachChartHover(rootEl) {
+    const tipEl = rootEl && rootEl.querySelector('[data-chart-tip]');
+    if (!rootEl || !tipEl) return () => {};
+    const showTip = (text, e) => {
+      tipEl.textContent = text;
+      tipEl.classList.remove('hidden');
+      const r = tipEl.getBoundingClientRect();
+      tipEl.style.left = `${Math.min(window.innerWidth - r.width - 8, Math.max(8, e.clientX - r.width / 2))}px`;
+      tipEl.style.top = `${Math.max(8, e.clientY - r.height - 12)}px`;
+    };
+    const hideAll = () => {
+      tipEl.classList.add('hidden');
+      rootEl.querySelectorAll('[data-cross],[data-dot]').forEach((el) => el.classList.add('hidden'));
+    };
     const onMove = (e) => {
       const sp = e.target.closest('[data-spark]');
       if (sp) {
@@ -362,21 +359,27 @@
         return;
       }
       const t = e.target.closest('[data-tip]');
-      if (t && root.contains(t)) { hideAll(); showTip(t.dataset.tip, e); return; }
+      if (t && rootEl.contains(t)) { hideAll(); showTip(t.dataset.tip, e); return; }
       hideAll();
     };
-    handlers = { onMove, onLeave: hideAll };
-    root.addEventListener('pointermove', onMove);
-    root.addEventListener('pointerleave', hideAll);
+    rootEl.addEventListener('pointermove', onMove);
+    rootEl.addEventListener('pointerleave', hideAll);
+    return () => {
+      rootEl.removeEventListener('pointermove', onMove);
+      rootEl.removeEventListener('pointerleave', hideAll);
+      hideAll();
+    };
+  }
+
+  function mount(container) {
+    unmount();
+    root = container.querySelector('#market-panel');
+    if (root) handlers = attachChartHover(root);
   }
 
   function unmount() {
-    if (root && handlers) {
-      root.removeEventListener('pointermove', handlers.onMove);
-      root.removeEventListener('pointerleave', handlers.onLeave);
-    }
-    hideAll();
-    root = tip = handlers = null;
+    if (handlers) handlers();
+    root = handlers = null;
   }
 
   // Swap just the Bitcoin card after a live refresh (called by app.js every minute).
@@ -386,4 +389,6 @@
   }
 
   U.marketPanel = { html, mount, unmount, updateCrypto };
+  // Shared chart helpers (used by the 글로벌 증시 view as well).
+  U.charts = { sparkline, attachChartHover, resetSparklines: () => sparks.clear() };
 })();

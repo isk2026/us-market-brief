@@ -164,7 +164,9 @@
             ${ui.typeBadge(ev.type)} ${ui.stars(ev.importance)}
             ${ev.ticker ? ui.ticker(ev.ticker) : ''}
             ${watched ? ui.badge('관심종목', 'bg-indigo-600 text-white') : ''}
-            ${released && ev.actual ? ui.badge(beat ? `발표 · ${beat.label}` : '발표 완료', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300') : ''}
+            ${released && ev.actual
+              ? (ev.type === 'earnings' && ui.surpriseBadge(ev)) || ui.badge(beat ? `발표 · ${beat.label}` : '발표 완료', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')
+              : ''}
           </div>
           <p class="font-semibold leading-snug">${esc(ev.title)}</p>
           ${sub ? `<p class="mt-0.5 truncate text-xs text-slate-500">${sub}</p>` : ''}

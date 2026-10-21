@@ -43,6 +43,7 @@
       </a>
       <nav id="nav" class="no-scrollbar flex flex-1 gap-1 overflow-x-auto text-sm">
         <a data-route="dashboard" href="#/dashboard" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">대시보드</a>
+        <a data-route="global" href="#/global" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">글로벌 증시</a>
         <a data-route="news" href="#/news" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">뉴스 및 지표 요약</a>
         <a data-route="calendar" href="#/calendar" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">경제지표·실적 캘린더</a>
       </nav>
@@ -75,8 +76,8 @@
     (function () {
       var v = Date.now();
       [
-        'js/core.js', 'js/marketData.js', 'js/mockData.js', 'js/data.js', 'js/api.js',
-        'js/views/marketPanel.js', 'js/views/dashboard.js', 'js/views/news.js', 'js/views/calendar.js', 'js/app.js',
+        'js/core.js', 'js/finnhub.js', 'js/marketData.js', 'js/mockData.js', 'js/data.js', 'js/api.js',
+        'js/views/marketPanel.js', 'js/views/dashboard.js', 'js/views/news.js', 'js/views/calendar.js', 'js/views/global.js', 'js/app.js',
       ].forEach(function (src) { document.write('<script src="' + src + '?v=' + v + '"><\/script>'); });
     })();
   </script>
