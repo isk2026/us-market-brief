@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>US Market Brief</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['"Noto Sans KR"', 'system-ui', 'sans-serif'] } } },
+    };
+    // Apply saved theme before first paint to avoid a flash.
+    try {
+      const t = JSON.parse(localStorage.getItem('umb.theme'));
+      if (t === 'dark' || (t === null && matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+    } catch { /* storage unavailable */ }
+  </script>
+  <style>
+    /* Chart tokens (dataviz: diverging bear↔bull with gray midpoint, validated for light/dark surfaces). */
+    :root {
+      --surface: #ffffff; --spark: #4f46e5;
+      --bear: #e34948; --bear-soft: #f0a2a1; --neutral: #8f8e88; --bull-soft: #86b6ef; --bull: #2a78d6;
+    }
+    .dark {
+      --surface: #0f172a; --spark: #818cf8;
+      --bear: #e66767; --bear-soft: #9b4645; --neutral: #9a9993; --bull-soft: #2f5f9e; --bull: #3987e5;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { scrollbar-width: none; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-100">
+  <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+    <div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+      <a href="#/dashboard" class="flex shrink-0 items-center gap-2 font-bold">
+        <span class="grid h-8 w-8 place-items-center rounded-lg bg-indigo-600 text-white">US</span>
+        <span class="hidden sm:inline">Market Brief</span>
+      </a>
+      <nav id="nav" class="no-scrollbar flex flex-1 gap-1 overflow-x-auto text-sm">
+        <a data-route="dashboard" href="#/dashboard" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">대시보드</a>
+        <a data-route="news" href="#/news" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">뉴스 및 지표 요약</a>
+        <a data-route="calendar" href="#/calendar" class="nav-link whitespace-nowrap rounded-lg px-3 py-2">경제지표·실적 캘린더</a>
+      </nav>
+      <span id="source-badge" class="hidden shrink-0 rounded-full px-2 py-1 text-xs font-medium md:inline"></span>
+      <button data-action="refresh" title="새로고침" class="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800">⟳</button>
+      <button data-action="settings" title="설정" class="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800">⚙</button>
+      <button data-action="theme" title="테마 전환" class="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800">◐</button>
+    </div>
+    <div id="ticker" class="no-scrollbar mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-3 text-sm"></div>
+  </header>
+
+  <main id="view" class="mx-auto max-w-7xl px-4 py-6"></main>
+
+  <footer class="mx-auto max-w-7xl px-4 pb-8 text-xs text-slate-500">
+    정보 제공 목적이며 투자 권유가 아닙니다. 실시간 데이터: Finnhub (API 키 설정 시). 캘린더 일정은 한국시간(KST) 기준이며 미국 동부시간(ET)을 함께 표기합니다.
+  </footer>
+
+  <div id="modal" class="fixed inset-0 z-40 hidden items-end justify-center bg-black/50 p-0 opacity-0 motion-safe:transition-opacity motion-safe:duration-150 sm:items-center sm:p-4">
+    <div id="modal-body" role="dialog" aria-modal="true" tabindex="-1"
+      class="max-h-[90vh] w-full max-w-2xl scale-95 overflow-y-auto rounded-t-2xl bg-white p-6 opacity-0 shadow-xl outline-none motion-safe:transition motion-safe:duration-150 dark:bg-slate-900 sm:rounded-2xl"></div>
+  </div>
+  <div id="toast" class="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white opacity-0 transition-opacity dark:bg-white dark:text-slate-900"></div>
+
+  <!--
+    App scripts are written with a per-load version query so the browser never mixes cached old files
+    with new ones (python http.server lets Chrome cache JS heuristically). Order matters; they run in sequence.
+    js/marketData.js is the snapshot written by `node scripts/fetch-market-data.mjs` (MOCK_MARKET is used when absent).
+  -->
+  <script>
+    (function () {
+      var v = Date.now();
+      [
+        'js/core.js', 'js/marketData.js', 'js/mockData.js', 'js/data.js', 'js/api.js',
+        'js/views/marketPanel.js', 'js/views/dashboard.js', 'js/views/news.js', 'js/views/calendar.js', 'js/app.js',
+      ].forEach(function (src) { document.write('<script src="' + src + '?v=' + v + '"><\/script>'); });
+    })();
+  </script>
+</body>
+</html>
