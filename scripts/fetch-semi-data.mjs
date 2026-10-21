@@ -9,6 +9,8 @@
  * - Universe: all SOX constituents + major non-constituents (TSMC Taiwan listing, Samsung, SK hynix, …).
  * - Prices/history: Yahoo Finance chart (1y daily) → returns computed locally.
  * - Market cap: Yahoo v7 quote (cookie + crumb), converted to USD; Nasdaq summary fallback for US tickers.
+ * - Fundamentals (stock.fund): Yahoo quoteSummary (P/E, forward P/E, PEG, P/B, EV/EBITDA, margins, ROE, growth,
+ *   FCF) + fundamentals-timeseries statements (capex/sales, inventory turnover, DIO). Missing → null.
  * - Next earnings (US tickers): from the earnings section of js/marketData.js.
  * Zero dependencies (Node 18+ global fetch).
  */
@@ -194,17 +196,29 @@ async function chart(symbol) {
   };
 }
 
+// ---------- Yahoo session (cookie + crumb; kept in memory only, never written) ----------
+let yahooSessionPromise = null;
+function yahooSession() {
+  if (!yahooSessionPromise) {
+    yahooSessionPromise = (async () => {
+      const res = await http('https://fc.yahoo.com', { redirect: 'manual' });
+      const raw = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie')].filter(Boolean);
+      const cookie = raw.map((c) => c.split(';')[0]).join('; ');
+      if (!cookie) throw new Error('no cookie');
+      const cr = await http('https://query1.finance.yahoo.com/v1/test/getcrumb', { headers: { Cookie: cookie } });
+      const crumb = (await cr.text()).trim();
+      if (!cr.ok || !crumb || crumb.length > 40) throw new Error('no crumb');
+      return { cookie, crumb };
+    })();
+  }
+  return yahooSessionPromise;
+}
+
 // ---------- market caps ----------
 async function yahooCaps(symbols) {
   const caps = {};
   try {
-    const res = await http('https://fc.yahoo.com', { redirect: 'manual' });
-    const raw = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie')].filter(Boolean);
-    const cookie = raw.map((c) => c.split(';')[0]).join('; ');
-    if (!cookie) throw new Error('no cookie');
-    const cr = await http('https://query1.finance.yahoo.com/v1/test/getcrumb', { headers: { Cookie: cookie } });
-    const crumb = (await cr.text()).trim();
-    if (!cr.ok || !crumb || crumb.length > 40) throw new Error('no crumb');
+    const { cookie, crumb } = await yahooSession();
     for (let i = 0; i < symbols.length; i += 40) {
       const batch = symbols.slice(i, i + 40);
       const j = await json(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${batch.map(encodeURIComponent).join(',')}&crumb=${encodeURIComponent(crumb)}`,
@@ -228,6 +242,151 @@ async function nasdaqCap(ticker) {
   } catch {
     return null;
   }
+}
+
+// ---------- fundamentals (valuation, margins, capex intensity, inventory turnover) ----------
+// quoteSummary gives ratios/margins; fundamentals-timeseries gives statement lines for capex/sales and
+// inventory turnover. Missing values arrive as {} or absent → null. Nothing is estimated or filled in.
+const FUND_TYPES = ['trailingCapitalExpenditure', 'annualCapitalExpenditure', 'trailingTotalRevenue', 'annualTotalRevenue',
+  'trailingCostOfRevenue', 'annualCostOfRevenue', 'quarterlyInventory', 'annualInventory'];
+const num = (v) => {
+  const x = v && typeof v === 'object' ? v.raw : v;
+  return typeof x === 'number' && Number.isFinite(x) ? x : null;
+};
+const ratio = (v) => { const x = num(v); return x == null || x <= 0 || x > 1000 ? null : x; };      // P/E-style multiples
+const pctOf = (v) => { const x = num(v); return x == null || Math.abs(x) > 50 ? null : x * 100; };   // fraction → percent (drop absurd)
+
+async function timeseries(symbol) {
+  const now = Math.floor(Date.now() / 1000);
+  const p1 = now - 5 * 365 * 86400;
+  const j = await json(`https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=${FUND_TYPES.join(',')}&period1=${p1}&period2=${now}`);
+  const out = {};
+  for (const s of (j && j.timeseries && j.timeseries.result) || []) {
+    const type = s.meta && s.meta.type && s.meta.type[0];
+    if (!type) continue;
+    out[type] = (s[type] || []).filter((x) => x && x.asOfDate && x.reportedValue && Number.isFinite(x.reportedValue.raw))
+      .map((x) => ({ date: x.asOfDate, value: x.reportedValue.raw, currency: x.currencyCode || null }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+  return out;
+}
+
+const latest = (arr) => (arr && arr.length ? arr[arr.length - 1] : null);
+const daysBetween = (a, b) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400e3;
+
+function statementMetrics(ts) {
+  const res = { capexToSales: null, invTurnover: null, dio: null, asOf: null, currency: null, basis: { capexToSales: null, invTurnover: null } };
+  // Capex / sales: TTM when both lines exist for the same period, else the latest common fiscal year.
+  const tCap = latest(ts.trailingCapitalExpenditure), tRev = latest(ts.trailingTotalRevenue);
+  if (tCap && tRev && tCap.date === tRev.date && tRev.value > 0) {
+    res.capexToSales = (Math.abs(tCap.value) / tRev.value) * 100;
+    res.basis.capexToSales = 'TTM';
+    res.asOf = tRev.date; res.currency = tRev.currency;
+  } else {
+    const aRev = ts.annualTotalRevenue || [];
+    const aCap = new Map((ts.annualCapitalExpenditure || []).map((x) => [x.date, x.value]));
+    const fy = [...aRev].reverse().find((r) => aCap.has(r.date) && r.value > 0);
+    if (fy) {
+      res.capexToSales = (Math.abs(aCap.get(fy.date)) / fy.value) * 100;
+      res.basis.capexToSales = `FY${fy.date.slice(0, 4)}`;
+      res.asOf = fy.date; res.currency = fy.currency;
+    }
+  }
+  // Inventory turnover = COGS / average inventory over the same span.
+  const inv = [...(ts.quarterlyInventory || []), ...(ts.annualInventory || [])].filter((x) => x.value > 0);
+  const invByDate = new Map(inv.map((x) => [x.date, x.value]));
+  const invNear = (date, maxGap) => {
+    let best = null;
+    for (const [d, v] of invByDate) { const g = daysBetween(d, date); if (g <= maxGap && (!best || g < best.g)) best = { d, v, g }; }
+    return best;
+  };
+  const tCogs = latest(ts.trailingCostOfRevenue);
+  let turnover = null;
+  if (tCogs && tCogs.value > 0) {
+    const end = invNear(tCogs.date, 10);
+    const startDate = new Date(Date.parse(`${tCogs.date}T00:00:00Z`) - 365 * 86400e3).toISOString().slice(0, 10);
+    const start = invNear(startDate, 50);
+    if (end && start) {
+      turnover = tCogs.value / ((end.v + start.v) / 2);
+      res.basis.invTurnover = 'TTM';
+      if (!res.asOf || tCogs.date > res.asOf) { res.asOf = tCogs.date; res.currency = tCogs.currency; }
+    }
+  }
+  if (turnover == null) {
+    const aCogs = ts.annualCostOfRevenue || [];
+    const aInv = ts.annualInventory || [];
+    for (let i = aCogs.length - 1; i >= 0 && turnover == null; i--) {
+      const c = aCogs[i];
+      const endInv = aInv.find((x) => x.date === c.date);
+      const prevInv = [...aInv].reverse().find((x) => x.date < c.date && daysBetween(x.date, c.date) <= 400);
+      if (c.value > 0 && endInv && endInv.value > 0 && prevInv && prevInv.value > 0) {
+        turnover = c.value / ((endInv.value + prevInv.value) / 2);
+        res.basis.invTurnover = `FY${c.date.slice(0, 4)}`;
+        if (!res.asOf) { res.asOf = c.date; res.currency = c.currency; }
+      }
+    }
+  }
+  if (turnover != null && turnover > 0 && turnover < 1000) {
+    res.invTurnover = turnover;
+    res.dio = 365 / turnover;
+  }
+  return res;
+}
+
+async function fundamentals(symbol, ticker, quoteCurrency, toUsd) {
+  const errs = [];
+  let qs = null;
+  let ts = {};
+  try {
+    const { cookie, crumb } = await yahooSession();
+    const j = await json(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics,financialData&crumb=${encodeURIComponent(crumb)}`,
+      { headers: { Cookie: cookie } });
+    qs = j && j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
+  } catch (err) {
+    errs.push(`quoteSummary: ${err.message}`);
+  }
+  try {
+    ts = await timeseries(symbol);
+  } catch (err) {
+    errs.push(`timeseries: ${err.message}`);
+  }
+  const sd = (qs && qs.summaryDetail) || {}, ks = (qs && qs.defaultKeyStatistics) || {}, fd = (qs && qs.financialData) || {};
+  const st = statementMetrics(ts);
+  const revenue = num(fd.totalRevenue);
+  const fcf = num(fd.freeCashflow);
+  const financialCurrency = (typeof fd.financialCurrency === 'string' && fd.financialCurrency) || st.currency || null;
+  const fund = {
+    asOf: st.asOf,
+    financialCurrency,
+    source: 'Yahoo Finance',
+    pe: round(ratio(sd.trailingPE) ?? ratio(ks.trailingPE), 2),
+    fpe: round(ratio(sd.forwardPE) ?? ratio(ks.forwardPE), 2),
+    peg: round(ratio(ks.pegRatio), 2),
+    pb: round(ratio(ks.priceToBook) ?? ratio(sd.priceToBook), 2),
+    evEbitda: round(ratio(ks.enterpriseToEbitda), 2),
+    divYield: round(pctOf(sd.dividendYield), 2),
+    grossMargin: round(pctOf(fd.grossMargins), 2),
+    opMargin: round(pctOf(fd.operatingMargins), 2),
+    netMargin: round(pctOf(fd.profitMargins), 2),
+    roe: round(pctOf(fd.returnOnEquity), 2),
+    revenueGrowth: round(pctOf(fd.revenueGrowth), 2),
+    fcfMargin: round(revenue && fcf != null && revenue > 0 ? Math.max(-500, Math.min(500, (fcf / revenue) * 100)) : null, 2),
+    capexToSales: round(st.capexToSales, 2),
+    invTurnover: round(st.invTurnover, 2),
+    dio: round(st.dio, 1),
+    revenueUsd: revenue != null ? (() => { const u = toUsd(revenue, financialCurrency); return u != null ? Math.round(u) : null; })() : null,
+    basis: st.basis,
+  };
+  // ADRs / foreign listings: Yahoo mixes the quote currency (e.g. USD) with the reporting currency (e.g. TWD)
+  // in P/B and EV/EBITDA, giving meaningless values (TSM P/B ~81). Exclude them rather than show a wrong number.
+  if (quoteCurrency && financialCurrency && quoteCurrency !== financialCurrency) {
+    fund.pb = null;
+    fund.evEbitda = null;
+    fund.excluded = { keys: ['pb', 'evEbitda'], reason: `거래 통화(${quoteCurrency})와 재무제표 통화(${financialCurrency})가 달라 제외` };
+  }
+  const metricKeys = ['pe', 'fpe', 'peg', 'pb', 'evEbitda', 'divYield', 'grossMargin', 'opMargin', 'netMargin', 'roe', 'revenueGrowth', 'fcfMargin', 'capexToSales', 'invTurnover', 'dio', 'revenueUsd'];
+  if (errs.length) errors[`fund.${ticker}`] = errs.join('; ');
+  return metricKeys.some((k) => fund[k] != null) ? fund : null;
 }
 
 // ---------- main ----------
@@ -277,6 +436,9 @@ async function main() {
     return fx[cur] ? value / fx[cur] : null;
   };
 
+  const funds = {};
+  await pool(ok, 3, async ({ u, c }) => { funds[u.symbol] = await fundamentals(u.symbol, u.ticker, c.currency, toUsd); });
+
   const earnings = (market && market.earnings && market.earnings.items) || [];
   const todayKey = localDate(Date.now(), 'America/New_York');
 
@@ -291,6 +453,7 @@ async function main() {
       price: c.price, change: c.change, changePct: c.changePct, marketTime: c.marketTime, sessionDate: c.sessionDate,
       r: c.r, high52: c.high52, low52: c.low52, marketCapUsd: capUsd != null ? Math.round(capUsd) : null,
       series: c.series, nextEarnings: next ? next.date : null, earningsSession: next ? (next.session || null) : null,
+      fund: funds[u.symbol] || null,
     });
   }
   stocks.sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0));
@@ -320,6 +483,8 @@ async function main() {
   console.table(stocks.slice(0, 50).map((s) => ({ ticker: s.ticker, name: s.nameKo, sox: s.inSox ? 'Y' : '', seg: s.segment,
     price: s.price, '1D%': s.changePct?.toFixed(2), 'YTD%': s.r.ytd?.toFixed(1), capB: s.marketCapUsd ? Math.round(s.marketCapUsd / 1e9) : null, next: s.nextEarnings })));
   console.log(`SOX ${data.index ? data.index.price : '-'} (${data.index ? data.index.changePct?.toFixed(2) : '-'}%) · constituents ${cons.symbols.length} (${cons.method}, ${cons.asOf}) · stocks ${stocks.length} (SOX ${inSox} / non-SOX ${stocks.length - inSox}) · marketCap ${stocks.filter((s) => s.marketCapUsd).length}/${stocks.length}`);
+  const FUND_METRICS = ['pe', 'fpe', 'peg', 'pb', 'evEbitda', 'divYield', 'grossMargin', 'opMargin', 'netMargin', 'roe', 'revenueGrowth', 'fcfMargin', 'capexToSales', 'invTurnover', 'dio', 'revenueUsd'];
+  console.log(`fundamentals coverage (/${stocks.length}): ` + FUND_METRICS.map((k) => `${k} ${stocks.filter((x) => x.fund && x.fund[k] != null).length}`).join(' · '));
   if (Object.keys(errors).length) console.log('errors:', errors);
 }
 

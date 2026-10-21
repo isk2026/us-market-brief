@@ -301,6 +301,152 @@
     </section>`;
   }
 
+  // ---------- fundamentals: valuation / profitability / efficiency (s.fund from fetch-semi-data.mjs) ----------
+  // kind: 'x' ratio, 'pct' percent, 'days', 'usd'. hint = how to read it (neutral wording, not advice).
+  const FUND_GROUPS = {
+    valuation: { label: '밸류에이션', cols: [
+      ['pe', 'PER', 'x', '주가 ÷ 최근 12개월 주당순이익. 이익 대비 주가 수준. 적자 기업은 표시하지 않습니다.'],
+      ['fpe', 'Forward PER', 'x', '주가 ÷ 향후 12개월 예상 주당순이익(애널리스트 컨센서스). 성장 기대가 클수록 PER보다 낮게 나옵니다.'],
+      ['peg', 'PEG', 'x', 'PER ÷ 예상 이익성장률. 1 안팎이면 성장 대비 가격이 중립적이라고 흔히 해석합니다.'],
+      ['pb', 'PBR', 'x', '주가 ÷ 주당순자산. 장비·메모리처럼 자산이 큰 업종 비교에 자주 씁니다.'],
+      ['evEbitda', 'EV/EBITDA', 'x', '기업가치(시총+순부채) ÷ 감가상각 전 영업이익. 부채·감가상각 차이를 줄여 비교합니다.'],
+      ['divYield', '배당수익률', 'pct', '연간 주당배당금 ÷ 주가.'],
+    ] },
+    profit: { label: '수익성', cols: [
+      ['grossMargin', '매출총이익률', 'pct', '(매출 − 매출원가) ÷ 매출. 제품 경쟁력·가격 결정력의 지표.'],
+      ['opMargin', '영업이익률 (OPM)', 'pct', '영업이익 ÷ 매출. 판관비·R&D까지 반영한 본업의 수익성.'],
+      ['netMargin', '순이익률', 'pct', '순이익 ÷ 매출.'],
+      ['roe', 'ROE', 'pct', '순이익 ÷ 자기자본. 주주 자본으로 얼마나 벌었는지.'],
+      ['revenueGrowth', '매출 성장률', 'pct', '최근 분기 매출의 전년 동기 대비 증감률.'],
+    ] },
+    efficiency: { label: '투자·효율', cols: [
+      ['capexToSales', 'Capex/매출', 'pct', '설비투자 ÷ 매출. 파운드리·메모리는 높고 팹리스는 낮은 구조적 차이가 큽니다. 업황 사이클의 선행 신호로도 봅니다.'],
+      ['invTurnover', '재고자산 회전율', 'x', '매출원가 ÷ 평균 재고자산. 높을수록 재고가 빨리 팔립니다. 업황 둔화 시 먼저 떨어지는 경향.'],
+      ['dio', '재고일수 (DIO)', 'days', '365 ÷ 재고자산 회전율. 재고를 소진하는 데 걸리는 평균 일수.'],
+      ['fcfMargin', 'FCF 마진', 'pct', '잉여현금흐름(영업현금흐름 − 설비투자) ÷ 매출.'],
+      ['revenueUsd', '매출 (TTM)', 'usd', '최근 12개월 매출, USD 환산.'],
+    ] },
+  };
+  const fview = { group: 'valuation', sort: 'fpe', dir: 1 };
+  // Multiples, capex intensity and inventory days read low→high first; margins, growth and turnover high→low.
+  const LOW_FIRST = ['pe', 'fpe', 'peg', 'pb', 'evEbitda', 'capexToSales', 'dio'];
+  const defaultDir = (k) => (LOW_FIRST.includes(k) ? 1 : -1);
+
+  const fmtFund = (v, kind) => {
+    if (v == null || Number.isNaN(v)) return '-';
+    if (kind === 'pct') return `${v.toFixed(1)}%`;
+    if (kind === 'days') return `${Math.round(v)}일`;
+    if (kind === 'usd') return cap(v);
+    return `${v.toFixed(1)}x`;
+  };
+  const median = (vals) => {
+    const v = vals.filter((x) => x != null && !Number.isNaN(x)).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const m = Math.floor(v.length / 2);
+    return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+  };
+
+  // Forward PER vs operating margin; bubble area ∝ market cap; 2 categorical colors (SOX member / not).
+  function fundScatter(stocks) {
+    const pts = stocks.filter((s) => s.fund && s.fund.fpe > 0 && s.fund.opMargin != null);
+    if (pts.length < 3) return '';
+    const W = Math.max(300, Math.min(1200, (root.clientWidth || 680) - 76)), H = 300, padL = 40, padR = 16, padT = 12, padB = 34;
+    const CAP_Y = 80; // Forward PER above this is drawn at the top edge (marked ▲) so outliers don't flatten the rest.
+    const xs = pts.map((s) => s.fund.opMargin);
+    let x0 = Math.min(0, ...xs), x1 = Math.max(...xs);
+    const xr = (x1 - x0) || 10; x0 -= xr * 0.05; x1 += xr * 0.05;
+    const ymax = Math.min(CAP_Y, Math.max(...pts.map((s) => s.fund.fpe)) * 1.08);
+    const x = (v) => padL + ((v - x0) / (x1 - x0)) * (W - padL - padR);
+    const y = (v) => padT + (1 - Math.min(v, ymax) / ymax) * (H - padT - padB);
+    const maxCap = Math.max(...pts.map((s) => s.marketCapUsd || 0)) || 1;
+    const r = (s) => 4 + Math.sqrt((s.marketCapUsd || 0) / maxCap) * 14;
+    const big = new Set([...pts].sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0)).slice(0, 10).map((s) => s.symbol));
+    const xTicks = []; const xs0 = Math.ceil(x0 / 20) * 20; for (let v = xs0; v <= x1; v += 20) xTicks.push(v);
+    const yTicks = []; for (let v = 0; v <= ymax; v += ymax > 50 ? 20 : 10) yTicks.push(v);
+    const grid = yTicks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" class="text-slate-200 dark:text-slate-800"/>
+        <text x="${padL - 6}" y="${y(v) + 3}" font-size="10" text-anchor="end" fill="currentColor" opacity=".55">${v}</text>`).join('')
+      + xTicks.map((v) => `<text x="${x(v)}" y="${H - padB + 14}" font-size="10" text-anchor="middle" fill="currentColor" opacity=".55">${v}%</text>`).join('');
+    const dots = [...pts].sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0)).map((s) => {
+      const capped = s.fund.fpe > ymax;
+      const label = big.has(s.symbol) || U.isWatched(s.ticker);
+      return `<g data-tip="${esc(`${name(s)} (${s.ticker}) · Forward PER ${fmtFund(s.fund.fpe, 'x')} · 영업이익률 ${fmtFund(s.fund.opMargin, 'pct')} · 시총 ${cap(s.marketCapUsd)}`)}">
+        <circle cx="${x(s.fund.opMargin).toFixed(1)}" cy="${y(s.fund.fpe).toFixed(1)}" r="${r(s).toFixed(1)}" style="fill:${s.inSox ? 'var(--c1)' : 'var(--c2)'};stroke:var(--surface)" fill-opacity=".75" stroke-width="2"/>
+        ${capped ? `<text x="${x(s.fund.opMargin).toFixed(1)}" y="${(y(s.fund.fpe) + 4).toFixed(1)}" font-size="9" text-anchor="middle" fill="#fff">▲</text>` : ''}
+        ${label ? `<text x="${(x(s.fund.opMargin) + r(s) + 3).toFixed(1)}" y="${(y(s.fund.fpe) + 3).toFixed(1)}" font-size="10" font-weight="600" fill="currentColor">${esc(s.ticker)}</text>` : ''}
+      </g>`;
+    }).join('');
+    const legend = `<ul class="flex flex-wrap gap-x-3 text-xs text-slate-600 dark:text-slate-300">
+      <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full" style="background:var(--c1)"></span>SOX 구성</li>
+      <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full" style="background:var(--c2)"></span>비구성</li>
+      <li class="text-slate-400">원 크기 = 시가총액</li></ul>`;
+    return `<div class="mb-5">
+      <div class="mb-2 flex flex-wrap items-center justify-between gap-2"><p class="text-sm font-semibold">Forward PER × 영업이익률</p>${legend}</div>
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="max-w-full overflow-visible" role="img" aria-label="종목별 영업이익률(가로)과 Forward PER(세로) 산점도">
+        ${grid}
+        <line x1="${padL}" x2="${W - padR}" y1="${H - padB}" y2="${H - padB}" stroke="currentColor" class="text-slate-300 dark:text-slate-700"/>
+        ${dots}
+        <text x="${(W + padL) / 2}" y="${H - 2}" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">영업이익률 (OPM) →</text>
+        <text x="${padL}" y="${padT - 2}" font-size="10.5" fill="currentColor" opacity=".7">↑ Forward PER</text>
+      </svg>
+      <p class="mt-1 text-[11px] text-slate-500">오른쪽 아래일수록 높은 수익성 대비 낮은 예상 이익 배수입니다. Forward PER ${CAP_Y}배 초과는 위쪽 끝에 ▲로 표시. 적자·컨센서스 없는 종목은 제외.</p>
+    </div>`;
+  }
+
+  function fundamentals(stocks) {
+    const have = stocks.filter((s) => s.fund);
+    if (!have.length) return '';
+    const g = FUND_GROUPS[fview.group];
+    if (!g.cols.some(([k]) => k === fview.sort)) { fview.sort = g.cols[0][0]; fview.dir = defaultDir(fview.sort); }
+    const list = [...have].sort((a, b) => {
+      const va = a.fund[fview.sort], vb = b.fund[fview.sort];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (va - vb) * fview.dir;
+    });
+    const tab = (k) => `<button data-semi="fgroup" data-value="${k}" role="tab" aria-selected="${fview.group === k}"
+      class="rounded-md px-3 py-1.5 text-sm font-medium transition ${fview.group === k
+        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}">${FUND_GROUPS[k].label}</button>`;
+    const th = ([k, label, , hint]) => `<th class="whitespace-nowrap px-2 py-2 text-right font-medium" aria-sort="${fview.sort === k ? (fview.dir > 0 ? 'ascending' : 'descending') : 'none'}" data-tip="${esc(`${label}: ${hint}`)}">
+      <button data-semi="fsort" data-value="${k}" class="inline-flex items-center gap-0.5 border-b border-dotted border-slate-400 hover:text-slate-800 dark:hover:text-slate-200">${label}${fview.sort === k ? (fview.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`;
+    const medRow = `<tr class="bg-slate-50 font-semibold dark:bg-slate-800/60">
+      <td class="px-2 py-2 text-xs">표시 종목 중앙값 <span class="font-normal text-slate-500">(${have.length})</span></td>
+      ${g.cols.map(([k, , kind]) => `<td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">${fmtFund(median(have.map((s) => s.fund[k])), kind)}</td>`).join('')}
+    </tr>`;
+    const rows = list.map((s) => `<tr class="${U.isWatched(s.ticker) ? 'bg-indigo-50/70 dark:bg-indigo-500/10' : ''}">
+      <td class="px-2 py-2"><div class="flex items-center gap-2"><span aria-hidden="true">${FLAGS[s.country] || ''}</span>
+        <div class="min-w-0"><p class="truncate font-medium">${esc(name(s))}</p><p class="text-[11px] text-slate-500">${ui.ticker(s.ticker)} · ${esc(SEGMENTS[s.segment] || '')}</p></div></div></td>
+      ${g.cols.map(([k, , kind]) => {
+        const basis = s.fund.basis && s.fund.basis[k];
+        // Metrics dropped by the fetcher because the quote and reporting currencies differ (e.g. TSM ADR vs TWD books).
+        const ex = s.fund.excluded && (s.fund.excluded.keys || []).includes(k);
+        if (ex) return `<td class="whitespace-nowrap px-2 py-2 text-right text-xs text-slate-400" data-tip="${esc(s.fund.excluded.reason || '통화 불일치로 제외')}">n/a</td>`;
+        return `<td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums"${basis ? ` title="${esc(basis)} 기준"` : ''}>${fmtFund(s.fund[k], kind)}</td>`;
+      }).join('')}
+    </tr>`).join('');
+    const asOfs = have.map((s) => s.fund.asOf).filter(Boolean).sort();
+    return `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-bold">밸류에이션 · 수익성 · 효율 비교</h2>
+          <p class="mt-0.5 text-xs text-slate-500">지표 이름에 마우스를 올리면 설명이 나옵니다 · 머리글을 눌러 정렬</p>
+        </div>
+        <div class="flex rounded-lg bg-slate-100 p-1 dark:bg-slate-800" role="tablist">${Object.keys(FUND_GROUPS).map(tab).join('')}</div>
+      </div>
+      ${fview.group === 'valuation' || fview.group === 'profit' ? fundScatter(have) : ''}
+      <div class="-mx-5 overflow-x-auto px-5"><table class="w-full min-w-[760px] text-sm">
+        <thead class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800"><tr>
+          <th class="px-2 py-2 text-left font-medium">종목</th>${g.cols.map(th).join('')}</tr></thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">${medRow}${rows}</tbody>
+      </table></div>
+      <p class="mt-3 text-[11px] leading-relaxed text-slate-500">
+        출처 Yahoo Finance (재무제표 기준일 ${esc(asOfs[0] || '-')} ~ ${esc(asOfs[asOfs.length - 1] || '-')}). 회계기준(US GAAP·IFRS·K-IFRS)과 결산월이 달라 종목 간 수치는 근사 비교입니다.
+        Capex/매출·재고 지표는 최근 12개월(TTM)을 우선 쓰고 없으면 최근 회계연도 값입니다(숫자에 마우스를 올리면 기준 표시). 투자 권유가 아닙니다.
+      </p>
+    </section>`;
+  }
+
   // ---------- upcoming earnings ----------
   function earnings(stocks) {
     const today = U.dateKey(new Date());
@@ -349,7 +495,7 @@
         </div>
         <select data-semi="segment-select" class="ml-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900">${segOpts}</select>
       </div>
-      ${stocks.length ? `${heatmap(stocks)}${segments(stocks)}${table(stocks)}${earnings(stocks)}` : ui.card(ui.empty('조건에 맞는 종목이 없습니다.'))}
+      ${stocks.length ? `${heatmap(stocks)}${segments(stocks)}${table(stocks)}${fundamentals(stocks)}${earnings(stocks)}` : ui.card(ui.empty('조건에 맞는 종목이 없습니다.'))}
       <div data-chart-tip role="tooltip" class="pointer-events-none fixed z-50 hidden max-w-sm rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-white dark:text-slate-900"></div>
       <p class="text-xs text-slate-500">가격·등락은 각 거래소 현지 통화 기준 스냅샷(Yahoo Finance)입니다. 시가총액은 USD 환산. 투자 권유가 아닙니다.</p>
     </div>`;
@@ -368,7 +514,12 @@
         const kind = el.dataset.semi;
         if (kind === 'filter') view.filter = el.dataset.value;
         else if (kind === 'segment') view.segment = el.dataset.value;
-        else if (kind === 'sort') {
+        else if (kind === 'fgroup') fview.group = el.dataset.value;
+        else if (kind === 'fsort') {
+          const k = el.dataset.value;
+          if (fview.sort === k) fview.dir = -fview.dir;
+          else { fview.sort = k; fview.dir = defaultDir(k); }
+        } else if (kind === 'sort') {
           const k = el.dataset.value;
           if (view.sort === k) view.dir = -view.dir; else { view.sort = k; view.dir = ['name', 'segment', 'nextEarnings'].includes(k) ? 1 : -1; }
         } else return;
