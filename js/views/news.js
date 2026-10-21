@@ -84,7 +84,7 @@
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="text-sm font-semibold">${esc(ev.title)}</span>
         ${released ? surpriseBadge(ev) : ''}
-        <span class="ml-auto text-right text-xs text-slate-500" title="미국 ${esc(formatDateKo(ev.date))} ${esc(eventTimeLabel(ev))}">${esc(localTimeLabel(ev) || formatDateKo(ev.date))} KST</span>
+        <span class="basis-full text-xs text-slate-500 sm:ml-auto sm:basis-auto sm:text-right" title="미국 ${esc(formatDateKo(ev.date))} ${esc(eventTimeLabel(ev))}">${esc(localTimeLabel(ev) || formatDateKo(ev.date))} KST</span>
       </div>
       <div class="grid grid-cols-3 gap-2">
         ${released ? valueCell('실제', ev.actual, true) : '<div><p class="text-[11px] text-slate-500">실제</p><p class="text-sm text-slate-400">발표 전</p></div>'}${valueCell('예상', ev.forecast)}${valueCell('이전', ev.previous)}

@@ -45,8 +45,11 @@
     for (let i = series.length - 1; i >= 0; i--) if (Date.parse(`${series[i].date}T00:00:00Z`) <= target) return series[i].value ?? series[i].close;
     return null;
   };
-  const priceDigits = (i) => (/krw|jpy/i.test(i.key || '') || (i.price || 0) >= 1000 ? 2 : (i.price || 0) < 10 ? 4 : 2);
-  const section = (title, body, right = '') => `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">${ui.sectionTitle(title, right)}${body}</section>`;
+  // FX quotes below 10 (EUR/USD, GBP/USD, USD/CNY) need 4 decimals; commodities and everything else use 2.
+  const priceDigits = (i) => (i.pair && !/krw|jpy/i.test(i.key || '') && (i.price || 0) < 10 ? 4 : 2);
+  // Own header (wraps on phones) instead of ui.sectionTitle, whose title and right side share one row.
+  const section = (title, body, right = '') => `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5"><h2 class="text-base font-bold">${title}</h2>${right}</div>${body}</section>`;
   const chartWidth = () => Math.max(300, Math.min(1200, (root && root.clientWidth || 680) - 76));
 
   // ---------- A. key signals ----------
@@ -96,7 +99,8 @@
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(+v.toFixed(2));
     const grid = ticks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" class="text-slate-200 dark:text-slate-800"/>
       <text x="${padL - 6}" y="${y(v) + 3}" font-size="10" text-anchor="end" fill="currentColor" opacity=".55">${v.toFixed(2)}</text>`).join('');
-    const xl = tenors.map((t, i) => `<text x="${x(i)}" y="${H - 10}" font-size="10" text-anchor="middle" fill="currentColor" opacity=".6">${esc(t.label)}</text>`).join('');
+    // Narrow charts: short tenor codes (1M, 3M … 30Y) so the 11 axis labels don't collide.
+    const xl = tenors.map((t, i) => `<text x="${x(i)}" y="${H - 10}" font-size="10" text-anchor="middle" fill="currentColor" opacity=".6">${esc(W < 560 ? t.key : t.label)}</text>`).join('');
     const lines = sets.map((s) => {
       const pts = tenors.map((t, i) => (c[s.key][t.key] == null ? null : [x(i), y(c[s.key][t.key]), t, c[s.key][t.key]])).filter(Boolean);
       return `<path d="${pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('')}" fill="none" stroke-width="2" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''} style="stroke:${s.color}"/>
@@ -120,7 +124,7 @@
     return section('미국 국채 수익률 곡선', `
       <div class="mb-3 flex flex-wrap gap-2">${chips}</div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="max-w-full overflow-visible" role="img" aria-label="미국 국채 만기별 금리 곡선: 오늘, 1개월 전, 1년 전">${grid}${xl}${lines}</svg>
-      <div class="-mx-5 mt-3 overflow-x-auto px-5"><table class="w-full min-w-[640px] text-xs">
+      <div class="-mx-4 mt-3 overflow-x-auto px-4 sm:-mx-5 sm:px-5"><table class="w-full min-w-[640px] text-xs">
         <thead class="text-slate-500"><tr><th class="px-2 py-1 text-left font-medium">만기</th>${tenors.map((t) => `<th class="px-2 py-1 text-right font-medium">${esc(t.label)}</th>`).join('')}</tr></thead>
         <tbody><tr><td class="px-2 py-1.5 text-slate-500">금리 %<div class="text-[10px]">1개월 변화</div><div class="text-[10px] text-slate-400">1년 변화</div></td>${rows}</tr></tbody>
       </table></div>
@@ -184,7 +188,7 @@
       ${hasDur ? `<td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">${e.duration == null ? '-' : `${num(e.duration, 1)}년`}</td>` : ''}
       <td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">${e.expenseRatio == null ? '-' : `${num(e.expenseRatio)}%`}</td>
     </tr>`).join('');
-    return section('채권 ETF', `<div class="-mx-5 overflow-x-auto px-5"><table class="w-full min-w-[720px] text-sm">
+    return section('채권 ETF', `<div class="-mx-4 overflow-x-auto px-4 sm:-mx-5 sm:px-5"><table class="w-full min-w-[720px] text-sm">
       <thead class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800"><tr>
         <th class="px-2 py-2 text-left font-medium">ETF</th><th class="px-2 py-2 text-right font-medium">가격</th><th class="px-2 py-2 text-right font-medium">1일</th>
         <th class="px-2 py-2 text-right font-medium">1개월</th><th class="px-2 py-2 text-right font-medium">연초 대비</th><th class="px-2 py-2 text-right font-medium">1년</th>

@@ -25,7 +25,10 @@
     month: today0.getMonth(), // 0-based
     selected: U.kstTodayKey(),
     minImportance: 1,
+    expanded: new Set(),       // date keys whose full list is shown on phones
   };
+  // Phones: a busy earnings day can hold 40+ cards; show the first few and a "더 보기" toggle (md+ unchanged).
+  const MOBILE_MAX = 5;
 
   let root = null;
   let onClick = null;
@@ -199,12 +202,26 @@
     </div>`;
   }
 
+  // Event cards for one day; beyond MOBILE_MAX they are hidden below md unless that day is expanded.
+  function cardList(key, evs, ulCls) {
+    const open = cal.expanded.has(key);
+    const items = evs.map((ev, i) => {
+      const html = eventCard(ev);
+      return i < MOBILE_MAX || open ? html : html.replace('<li class="', '<li class="max-md:hidden ');
+    }).join('');
+    const extra = evs.length - MOBILE_MAX;
+    const toggle = extra > 0
+      ? `<button data-cal-action="expand" data-date="${key}" class="mt-2 w-full rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-indigo-600 md:hidden dark:border-slate-800 dark:text-indigo-400">${open ? '접기' : `+${extra}건 더 보기`}</button>`
+      : '';
+    return `<ul class="${ulCls}">${items}</ul>${toggle}`;
+  }
+
   // One date heading plus its event cards (week / list / favorites views).
   function daySection(key, evs, extraCls = '') {
     return `<section class="${extraCls}">
       ${dayHeader(key, evs.length)}
       ${evs.length
-        ? `<ul class="grid grid-cols-1 gap-2.5 md:grid-cols-2">${evs.map(eventCard).join('')}</ul>`
+        ? cardList(key, evs, 'grid grid-cols-1 gap-2.5 md:grid-cols-2')
         : '<p class="rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400 dark:border-slate-800">예정된 일정이 없습니다</p>'}
     </section>`;
   }
@@ -262,9 +279,10 @@
     const evs = byKst.get(cal.selected) || [];
     const panel = ui.card(
       dayHeader(cal.selected, evs.length) +
-      (evs.length ? `<ul class="space-y-2.5">${evs.map(eventCard).join('')}</ul>` : ui.empty('선택한 날짜에 일정이 없습니다.')),
-      'lg:max-h-[48rem] lg:overflow-y-auto');
-    return `<div class="grid gap-5 lg:grid-cols-3">
+      (evs.length ? cardList(cal.selected, evs, 'space-y-2.5') : ui.empty('선택한 날짜에 일정이 없습니다.')),
+      'min-w-0 lg:max-h-[48rem] lg:overflow-y-auto');
+    // grid-cols-1 (minmax(0,1fr)) so long card text can't widen the track past the phone width.
+    return `<div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
       ${ui.card(`<div class="grid grid-cols-7">${head}${cells}</div>`, 'p-2 sm:p-3 lg:col-span-2')}
       ${panel}
     </div>`;
@@ -349,6 +367,11 @@
         if (!el || !root.contains(el) || el.tagName === 'SELECT') return;
         switch (el.dataset.calAction) {
           case 'filter': cal.filter = el.dataset.filter; break;
+          case 'expand': {
+            const k = el.dataset.date;
+            if (cal.expanded.has(k)) cal.expanded.delete(k); else cal.expanded.add(k);
+            break;
+          }
           case 'fav': {
             const on = U.toggleFavorite(el.dataset.id);
             U.toast(on ? '★ 즐겨찾기에 저장했습니다' : '즐겨찾기에서 해제했습니다');

@@ -210,11 +210,12 @@
       const a = Math.min(1, Math.abs(v) / 4) * 0.75 + 0.12;
       const bg = v >= 0 ? `rgba(16,185,129,${a.toFixed(2)})` : `rgba(244,63,94,${a.toFixed(2)})`;
       const big = (s.marketCapUsd || 0) >= 5e11;
-      return `<div class="flex min-w-0 flex-col justify-between rounded-lg p-2 ${big ? 'col-span-2 row-span-2' : ''} ${a > 0.5 ? 'text-white' : 'text-slate-800 dark:text-slate-100'}"
+      // Big ($500B+) tiles span 2×2 only from sm up; on phones every tile is one cell so the grid stays short.
+      return `<div class="flex min-w-0 flex-col justify-between rounded-lg p-2 ${big ? 'sm:col-span-2 sm:row-span-2' : ''} ${a > 0.5 ? 'text-white' : 'text-slate-800 dark:text-slate-100'}"
         style="background:${bg}" data-tip="${esc(`${name(s)} (${s.ticker}) · ${price(s.price, s.currency)} ${s.currency} · ${pct(s.changePct)} · 시총 ${cap(s.marketCapUsd)}`)}">
-        <span class="truncate font-mono ${big ? 'text-base' : 'text-xs'} font-bold">${esc(s.ticker)}</span>
-        <span class="truncate ${big ? 'text-xs' : 'text-[10px]'} opacity-90">${esc(name(s))}</span>
-        <span class="font-mono ${big ? 'text-lg' : 'text-xs'} font-semibold tabular-nums">${arrow(s.changePct)} ${pct(s.changePct)}</span>
+        <span class="truncate font-mono ${big ? 'text-xs sm:text-base' : 'text-xs'} font-bold">${esc(s.ticker)}</span>
+        <span class="truncate ${big ? 'text-[10px] sm:text-xs' : 'text-[10px]'} opacity-90">${esc(name(s))}</span>
+        <span class="font-mono ${big ? 'text-xs sm:text-lg' : 'text-xs'} font-semibold tabular-nums">${arrow(s.changePct)} ${pct(s.changePct)}</span>
       </div>`;
     };
     return `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -237,16 +238,16 @@
       <span class="absolute inset-y-0 ${v >= 0 ? 'left-1/2 rounded-r bg-emerald-500' : 'right-1/2 rounded-l bg-rose-500'}" style="width:${(Math.abs(v || 0) / max) * 50}%"></span></span>`;
     return `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       ${ui.sectionTitle('세그먼트별 평균 성과 <span class="text-xs font-normal text-slate-500">연초 대비 순</span>')}
-      <div class="-mx-5 overflow-x-auto px-5"><table class="w-full min-w-[560px] text-sm">
-        <thead class="text-xs text-slate-500"><tr><th class="py-1.5 text-left font-medium">세그먼트</th><th class="py-1.5 text-right font-medium">종목</th>
-          <th class="py-1.5 text-right font-medium">1일</th><th class="py-1.5 text-right font-medium">1개월</th><th class="py-1.5 text-right font-medium">연초 대비</th><th class="w-1/3 py-1.5"></th></tr></thead>
+      <div class="-mx-5 overflow-x-auto px-5"><table class="w-full text-sm sm:min-w-[560px]">
+        <thead class="text-xs text-slate-500"><tr><th class="py-1.5 text-left font-medium">세그먼트</th><th class="hidden py-1.5 text-right font-medium sm:table-cell">종목</th>
+          <th class="py-1.5 text-right font-medium">1일</th><th class="py-1.5 text-right font-medium">1개월</th><th class="py-1.5 text-right font-medium">연초 대비</th><th class="hidden w-1/3 py-1.5 sm:table-cell"></th></tr></thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">${rows.map((r) => `<tr>
           <td class="py-2"><button data-semi="segment" data-value="${r.k}" class="text-left hover:text-indigo-600 dark:hover:text-indigo-400">${esc(r.label)}</button></td>
-          <td class="py-2 text-right font-mono text-slate-500">${r.n}</td>
+          <td class="hidden py-2 text-right font-mono text-slate-500 sm:table-cell">${r.n}</td>
           <td class="py-2 text-right font-mono tabular-nums ${tone(r.d1)}">${pct(r.d1)}</td>
           <td class="py-2 text-right font-mono tabular-nums ${tone(r.m1)}">${pct(r.m1)}</td>
           <td class="py-2 text-right font-mono font-semibold tabular-nums ${tone(r.ytd)}">${pct(r.ytd)}</td>
-          <td class="py-2 pl-3">${bar(r.ytd)}</td></tr>`).join('')}</tbody>
+          <td class="hidden py-2 pl-3 sm:table-cell">${bar(r.ytd)}</td></tr>`).join('')}</tbody>
       </table></div>
     </section>`;
   }
@@ -270,20 +271,22 @@
       if (y == null) return -1;
       return (typeof x === 'string' ? x.localeCompare(y, 'ko') : x - y) * view.dir;
     });
-    const th = ([k, label, align]) => `<th class="whitespace-nowrap px-2 py-2 font-medium text-${align}" aria-sort="${view.sort === k ? (view.dir > 0 ? 'ascending' : 'descending') : 'none'}">
+    // Phones: the name column stays pinned while the numbers scroll; segment is hidden (also shown via filter).
+    const thCls = (k) => (k === 'name' ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : k === 'segment' ? 'hidden sm:table-cell' : '');
+    const th = ([k, label, align]) => `<th class="whitespace-nowrap px-2 py-2 font-medium text-${align} ${thCls(k)}" aria-sort="${view.sort === k ? (view.dir > 0 ? 'ascending' : 'descending') : 'none'}">
       <button data-semi="sort" data-value="${k}" class="inline-flex items-center gap-0.5 hover:text-slate-800 dark:hover:text-slate-200">${label}${view.sort === k ? (view.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`;
     const cell = (v) => `<td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums ${tone(v)}">${pct(v)}</td>`;
     const rows = list.map((s) => {
       const p = pos52(s);
       const watched = U.isWatched(s.ticker);
       return `<tr class="${watched ? 'bg-indigo-50/70 dark:bg-indigo-500/10' : ''}">
-        <td class="px-2 py-2"><div class="flex items-center gap-2">
+        <td class="sticky left-0 z-10 max-w-[9.5rem] px-2 py-2 sm:max-w-none ${watched ? 'bg-indigo-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'}"><div class="flex items-center gap-2">
           <span aria-hidden="true">${FLAGS[s.country] || ''}</span>
           <div class="min-w-0"><p class="truncate font-medium">${esc(name(s))}${watched ? ' <span class="text-indigo-600 dark:text-indigo-400" title="관심종목">★</span>' : ''}</p>
             <p class="flex items-center gap-1 text-[11px] text-slate-500">${ui.ticker(s.ticker)}${s.inSox
               ? '<span class="rounded bg-indigo-100 px-1 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">SOX</span>'
               : '<span class="rounded bg-slate-100 px-1 text-[10px] text-slate-500 dark:bg-slate-800">비구성</span>'}</p></div></div></td>
-        <td class="whitespace-nowrap px-2 py-2 text-xs text-slate-600 dark:text-slate-300">${esc(SEGMENTS[s.segment] || '-')}</td>
+        <td class="hidden whitespace-nowrap px-2 py-2 text-xs text-slate-600 dark:text-slate-300 sm:table-cell">${esc(SEGMENTS[s.segment] || '-')}</td>
         <td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">${cap(s.marketCapUsd)}</td>
         <td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">${price(s.price, s.currency)} <span class="text-[10px] text-slate-400">${esc(s.currency || '')}</span></td>
         ${cell(s.changePct)}${cell(s.r?.w1)}${cell(s.r?.m1)}${cell(s.r?.m3)}${cell(s.r?.ytd)}
@@ -359,8 +362,16 @@
     const x = (v) => padL + ((v - x0) / (x1 - x0)) * (W - padL - padR);
     const y = (v) => padT + (1 - Math.min(v, ymax) / ymax) * (H - padT - padB);
     const maxCap = Math.max(...pts.map((s) => s.marketCapUsd || 0)) || 1;
-    const r = (s) => 4 + Math.sqrt((s.marketCapUsd || 0) / maxCap) * 14;
-    const big = new Set([...pts].sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0)).slice(0, 10).map((s) => s.symbol));
+    const narrow = W < 480;
+    const r = (s) => 4 + Math.sqrt((s.marketCapUsd || 0) / maxCap) * (narrow ? 9 : 14);
+    const big = new Set([...pts].sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0)).slice(0, narrow ? 6 : 10).map((s) => s.symbol));
+    // Greedy label placement: skip a label that would overlap one already placed (e.g. TSM vs 2330).
+    const placed = [];
+    const fits = (lx, ly, w) => {
+      if (placed.some((p) => Math.abs(p.y - ly) < 11 && lx < p.x + p.w && p.x < lx + w)) return false;
+      placed.push({ x: lx, y: ly, w });
+      return true;
+    };
     const xTicks = []; const xs0 = Math.ceil(x0 / 20) * 20; for (let v = xs0; v <= x1; v += 20) xTicks.push(v);
     const yTicks = []; for (let v = 0; v <= ymax; v += ymax > 50 ? 20 : 10) yTicks.push(v);
     const grid = yTicks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" class="text-slate-200 dark:text-slate-800"/>
@@ -368,7 +379,8 @@
       + xTicks.map((v) => `<text x="${x(v)}" y="${H - padB + 14}" font-size="10" text-anchor="middle" fill="currentColor" opacity=".55">${v}%</text>`).join('');
     const dots = [...pts].sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0)).map((s) => {
       const capped = s.fund.fpe > ymax;
-      const label = big.has(s.symbol) || U.isWatched(s.ticker);
+      const lx = x(s.fund.opMargin) + r(s) + 3, ly = y(s.fund.fpe) + 3;
+      const label = (big.has(s.symbol) || U.isWatched(s.ticker)) && fits(lx, ly, String(s.ticker).length * 6.2);
       return `<g data-tip="${esc(`${name(s)} (${s.ticker}) · Forward PER ${fmtFund(s.fund.fpe, 'x')} · 영업이익률 ${fmtFund(s.fund.opMargin, 'pct')} · 시총 ${cap(s.marketCapUsd)}`)}">
         <circle cx="${x(s.fund.opMargin).toFixed(1)}" cy="${y(s.fund.fpe).toFixed(1)}" r="${r(s).toFixed(1)}" style="fill:${s.inSox ? 'var(--c1)' : 'var(--c2)'};stroke:var(--surface)" fill-opacity=".75" stroke-width="2"/>
         ${capped ? `<text x="${x(s.fund.opMargin).toFixed(1)}" y="${(y(s.fund.fpe) + 4).toFixed(1)}" font-size="9" text-anchor="middle" fill="#fff">▲</text>` : ''}
@@ -411,12 +423,12 @@
     const th = ([k, label, , hint]) => `<th class="whitespace-nowrap px-2 py-2 text-right font-medium" aria-sort="${fview.sort === k ? (fview.dir > 0 ? 'ascending' : 'descending') : 'none'}" data-tip="${esc(`${label}: ${hint}`)}">
       <button data-semi="fsort" data-value="${k}" class="inline-flex items-center gap-0.5 border-b border-dotted border-slate-400 hover:text-slate-800 dark:hover:text-slate-200">${label}${fview.sort === k ? (fview.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`;
     const medRow = `<tr class="bg-slate-50 font-semibold dark:bg-slate-800/60">
-      <td class="px-2 py-2 text-xs">표시 종목 중앙값 <span class="font-normal text-slate-500">(${have.length})</span></td>
+      <td class="sticky left-0 z-10 bg-slate-50 px-2 py-2 text-xs dark:bg-slate-800">표시 종목 중앙값 <span class="font-normal text-slate-500">(${have.length})</span></td>
       ${g.cols.map(([k, , kind]) => `<td class="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">${fmtFund(median(have.map((s) => s.fund[k])), kind)}</td>`).join('')}
     </tr>`;
     const rows = list.map((s) => `<tr class="${U.isWatched(s.ticker) ? 'bg-indigo-50/70 dark:bg-indigo-500/10' : ''}">
-      <td class="px-2 py-2"><div class="flex items-center gap-2"><span aria-hidden="true">${FLAGS[s.country] || ''}</span>
-        <div class="min-w-0"><p class="truncate font-medium">${esc(name(s))}</p><p class="text-[11px] text-slate-500">${ui.ticker(s.ticker)} · ${esc(SEGMENTS[s.segment] || '')}</p></div></div></td>
+      <td class="sticky left-0 z-10 max-w-[9.5rem] px-2 py-2 sm:max-w-none ${U.isWatched(s.ticker) ? 'bg-indigo-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'}"><div class="flex items-center gap-2"><span aria-hidden="true">${FLAGS[s.country] || ''}</span>
+        <div class="min-w-0"><p class="truncate font-medium">${esc(name(s))}</p><p class="truncate text-[11px] text-slate-500">${ui.ticker(s.ticker)}<span class="hidden sm:inline"> · ${esc(SEGMENTS[s.segment] || '')}</span></p></div></div></td>
       ${g.cols.map(([k, , kind]) => {
         const basis = s.fund.basis && s.fund.basis[k];
         // Metrics dropped by the fetcher because the quote and reporting currencies differ (e.g. TSM ADR vs TWD books).
@@ -437,7 +449,7 @@
       ${fview.group === 'valuation' || fview.group === 'profit' ? fundScatter(have) : ''}
       <div class="-mx-5 overflow-x-auto px-5"><table class="w-full min-w-[760px] text-sm">
         <thead class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800"><tr>
-          <th class="px-2 py-2 text-left font-medium">종목</th>${g.cols.map(th).join('')}</tr></thead>
+          <th class="sticky left-0 z-10 bg-white px-2 py-2 text-left font-medium dark:bg-slate-900">종목</th>${g.cols.map(th).join('')}</tr></thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">${medRow}${rows}</tbody>
       </table></div>
       <p class="mt-3 text-[11px] leading-relaxed text-slate-500">

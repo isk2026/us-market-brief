@@ -100,7 +100,7 @@
     const bar = (i) => {
       const w = (Math.abs(i.changePct) / max) * 50;
       const up = i.changePct >= 0;
-      return `<li class="grid grid-cols-[6.5rem_1fr_4.5rem] items-center gap-2 text-sm sm:grid-cols-[8rem_1fr_4.5rem]"
+      return `<li class="grid grid-cols-[8.75rem_1fr_4.25rem] items-center gap-2 text-sm sm:grid-cols-[9rem_1fr_4.5rem]"
           data-tip="${esc(`${i.name} ${fmtPrice(i.price)} · ${pctText(i.changePct)} (${i.sessionDate || ''} 현지)`)}">
         <span class="truncate"><span aria-hidden="true">${FLAGS[i.country] || ''}</span> ${esc(i.name)}</span>
         <span class="relative h-5" aria-hidden="true">

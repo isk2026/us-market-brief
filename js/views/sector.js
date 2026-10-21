@@ -99,11 +99,11 @@
       : spread > 0
         ? '방어 섹터가 상대적으로 강합니다. 일반적으로 위험 회피 성향이 커질 때 나타나는 흐름으로 해석됩니다.'
         : '경기민감·성장 섹터가 상대적으로 강합니다. 일반적으로 위험 선호 성향이 강할 때 나타나는 흐름으로 해석됩니다.';
-    return `<section class="mb-6 grid gap-4 lg:grid-cols-4">
+    return `<section class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
       ${g.map((x) => `<div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900" data-tip="${esc(x.hint)}">
-        <div class="mb-1 flex items-center gap-2">${ui.badge(x.label, x.cls)}<span class="text-xs text-slate-500">${x.n}개 섹터 평균 · ${label(k)}</span></div>
+        <div class="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5"><span class="whitespace-nowrap">${ui.badge(x.label, x.cls)}</span><span class="text-[11px] text-slate-500 sm:text-xs">${x.n}개 섹터 평균 · ${label(k)}</span></div>
         <p class="font-mono text-2xl font-bold tabular-nums ${tone(x.v)}">${pct(x.v)}</p>
-        <p class="mt-1 text-[11px] leading-snug text-slate-500">${esc(x.hint)}</p>
+        <p class="mt-1 hidden text-[11px] leading-snug text-slate-500 sm:block">${esc(x.hint)}</p>
       </div>`).join('')}
       <div class="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4 shadow-sm dark:border-indigo-500/30 dark:bg-indigo-500/10">
         <p class="text-xs font-semibold text-slate-600 dark:text-slate-300">방어 − 경기민감 스프레드</p>
@@ -137,15 +137,15 @@
         <button data-sec="sort" data-value="${k}" class="hover:text-slate-800 dark:hover:text-slate-200">${l}${active ? (view.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`;
     };
     const row = (e, bench) => `<tr class="${bench ? 'bg-slate-50 font-semibold dark:bg-slate-800/60' : ''}">
-      <td class="whitespace-nowrap px-2 py-2"><span class="font-mono text-xs font-bold">${esc(e.symbol)}</span> <span class="text-slate-600 dark:text-slate-300">${esc(nm(e))}</span>
-        ${e.group ? ui.badge(GROUPS[e.group].label, GROUPS[e.group].cls) : ''}</td>
+      <td class="sticky left-0 z-10 whitespace-nowrap px-2 py-2 ${bench ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'}"><span class="font-mono text-xs font-bold">${esc(e.symbol)}</span> <span class="text-slate-600 dark:text-slate-300">${esc(nm(e))}</span>
+        ${e.group ? `<span class="hidden sm:inline">${ui.badge(GROUPS[e.group].label, GROUPS[e.group].cls)}</span>` : ''}</td>
       ${PERIODS.map(([p]) => cell(e, p)).join('')}
     </tr>`;
     return `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       ${ui.sectionTitle('기간별 수익률 히트맵 <span class="text-xs font-normal text-slate-500">머리글을 눌러 정렬 · 색이 진할수록 해당 기간 내 상대적으로 큰 움직임</span>')}
-      <div class="-mx-5 overflow-x-auto px-5"><table class="w-full min-w-[720px] text-sm">
+      <div class="-mx-5 overflow-x-auto px-5"><table class="w-full min-w-[560px] text-sm sm:min-w-[720px]">
         <thead class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800"><tr>
-          <th class="px-2 py-2 text-left font-medium"><button data-sec="sort" data-value="symbol" class="hover:text-slate-800 dark:hover:text-slate-200">ETF${key === 'symbol' ? (view.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>
+          <th class="sticky left-0 z-10 bg-white px-2 py-2 text-left font-medium dark:bg-slate-900"><button data-sec="sort" data-value="symbol" class="hover:text-slate-800 dark:hover:text-slate-200">ETF${key === 'symbol' ? (view.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>
           ${PERIODS.map(([p, l]) => th(p, l)).join('')}</tr></thead>
         <tbody class="divide-y divide-white dark:divide-slate-900">${d.benchmark ? row(d.benchmark, true) : ''}${rows.map((e) => row(e, false)).join('')}</tbody>
       </table></div>
