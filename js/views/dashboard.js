@@ -143,17 +143,30 @@
       const k = kstDateKey(e);
       if (k >= today && k <= end) (byDate[k] ||= []).push(e);
     });
-    const groups = Object.keys(byDate).sort().map((d) => `
+    // With the full major-company earnings calendar a day can hold 40+ events; show the most important
+    // few per day (then by time) and send the rest to the calendar tab.
+    const PER_DAY = 6;
+    // Equal importance: macro releases (Fed, indicators, holidays) before single-company earnings.
+    const TYPE_RANK = { fed: 0, economic: 1, holiday: 2, earnings: 3 };
+    const groups = Object.keys(byDate).sort().map((d) => {
+      const all = byDate[d];
+      const shown = [...all].sort((a, b) => b.importance - a.importance
+        || (TYPE_RANK[a.type] ?? 9) - (TYPE_RANK[b.type] ?? 9) || eventDate(a) - eventDate(b)).slice(0, PER_DAY)
+        .sort((a, b) => eventDate(a) - eventDate(b));
+      const more = all.length - shown.length;
+      return `
       <div>
         <p class="mb-1 text-xs font-semibold ${d === today ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500'}">${esc(formatDateKo(d))}${d === today ? ' · 오늘' : ''}</p>
-        <ul class="space-y-1.5">${byDate[d].map((e) => `
+        <ul class="space-y-1.5">${shown.map((e) => `
           <li class="flex items-center gap-2 text-sm">
             <span class="h-2 w-2 shrink-0 rounded-full ${(EVENT_TYPES[e.type] || EVENT_TYPES.economic).dot}"></span>
             <span class="w-16 shrink-0 text-xs tabular-nums text-slate-500" title="미국 ${esc(eventTimeLabel(e))}">${esc(kstTime(e))}</span>
             <span class="min-w-0 flex-1 truncate">${esc(e.title)}</span>
             <span class="shrink-0 text-xs">${ui.stars(e.importance)}</span>
           </li>`).join('')}</ul>
-      </div>`).join('');
+        ${more > 0 ? `<a href="#/calendar" class="mt-1 inline-block text-xs text-indigo-600 hover:underline dark:text-indigo-400">+${more}개 더 · 캘린더에서 보기</a>` : ''}
+      </div>`;
+    }).join('');
     return ui.card(
       ui.sectionTitle('이번 주 일정 <span class="text-xs font-normal text-slate-400">KST</span>', '<a href="#/calendar" class="text-sm text-indigo-600 hover:underline dark:text-indigo-400">캘린더 →</a>') +
       (groups ? `<div class="space-y-4">${groups}</div>` : ui.empty('이번 주 일정이 없습니다.')));

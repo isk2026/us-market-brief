@@ -87,7 +87,7 @@
             <p class="text-2xl font-black leading-none ${L.text}" role="status" aria-live="polite">${L.label}</p>
           </div>
         </div>
-        <div class="grid min-w-0 flex-1 grid-cols-2 gap-2 ${liveChip ? 'lg:grid-cols-3' : ''}">
+        <div class="grid min-w-0 flex-1 basis-full grid-cols-2 gap-2 sm:basis-auto ${liveChip ? 'lg:grid-cols-3' : ''}">
           ${chip('VIX 변동성지수', vix ? vix.close.toFixed(2) : '-', lv,
             vix ? `${vix.date} 종가${vixChg != null ? ` · ${vixChg > 0 ? '+' : vixChg < 0 ? '−' : ''}${Math.abs(vixChg).toFixed(2)}` : ''} · Cboe` : '데이터 없음',
             'VIX: 20 미만 안정 · 20~30 유의 · 30 이상 공포')}

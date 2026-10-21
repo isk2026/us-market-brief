@@ -260,7 +260,7 @@
     const segs = AAII.map((c) => {
       const w = (s[c.key] / total) * 100;
       return `<div class="flex h-full items-center justify-center overflow-hidden text-xs font-semibold text-white first:rounded-l-lg last:rounded-r-lg"
-        style="width:${w}%;background:${c.color}" data-tip="${esc(`${c.label} ${fixed(s[c.key], 1)}% · 장기평균 ${fixed(avg[c.key], 1)}%`)}">${w >= 14 ? `${c.label} ${fixed(s[c.key], 1)}%` : ''}</div>`;
+        style="width:${w}%;background:${c.color}" data-tip="${esc(`${c.label} ${fixed(s[c.key], 1)}% · 장기평균 ${fixed(avg[c.key], 1)}%`)}">${w >= 10 ? `<span class="whitespace-nowrap px-1"><span class="hidden sm:inline">${c.label} </span>${fixed(s[c.key], 1)}%</span>` : ''}</div>`;
     }).join('');
     const legend = AAII.map((c) => {
       const diff = s[c.key] - avg[c.key];

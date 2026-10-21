@@ -189,6 +189,12 @@
       a.classList.toggle('font-semibold', active);
       a.classList.toggle('dark:bg-indigo-500/15', active);
       a.classList.toggle('dark:text-indigo-300', active);
+      a.setAttribute('aria-current', active ? 'page' : 'false');
+      // On narrow screens the tab row scrolls; keep the active tab in view (no page scroll).
+      if (active) {
+        const nav = $('#nav');
+        if (nav.scrollWidth > nav.clientWidth) nav.scrollTo({ left: a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2, behavior: 'smooth' });
+      }
     });
   }
 
