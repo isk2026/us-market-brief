@@ -49,6 +49,7 @@ node scripts/fetch-market-data.mjs   # js/marketData.js 갱신
 - **주요 기업 실적:** 대시보드 카드에서 [발표 예정] / [최근 발표] 탭과 [전체 / 대형주 $200B+ / 관심종목] 필터로 볼 수 있고, 캘린더 탭에도 같은 일정이 들어갑니다. 무료 Nasdaq 캘린더에는 실제 EPS가 없어 발표된 실적은 '발표 완료 · 결과 보기' 링크로 표시합니다(Finnhub 키를 넣은 실시간 모드에서는 실제 EPS 표시). 발표 시각은 장 전/장 후만 제공됩니다.
 
 - **자동 갱신:** Windows 작업 스케줄러 작업 `USMarketBrief - Market Data`가 매일 07:00(KST)에 `scripts/update-market-data.cmd`를 실행합니다. PC가 꺼져 있었다면 다음에 켜질 때 실행되며, 로그는 `logs/market-data.log`에 쌓입니다.
+  - 수집이 성공하면 `js/marketData.js`만 `data: market snapshot YYYY-MM-DD`로 커밋해 `origin/master`에 push하고, GitHub Pages(https://isk2026.github.io/us-market-brief/)가 새 데이터로 재배포됩니다. 수집 실패, `master`가 아닌 브랜치, 변경 없음일 때는 건너뜁니다. 다른 작업 중인 파일은 커밋되지 않습니다.
   - 지금 실행: `Start-ScheduledTask -TaskName "USMarketBrief - Market Data"`
   - 해제: `Unregister-ScheduledTask -TaskName "USMarketBrief - Market Data" -Confirm:$false`
 - 열어 둔 화면은 ⟳ 버튼, 5분 자동 갱신, 또는 10분 이상 지나 탭으로 돌아올 때 최신 스냅샷을 다시 읽습니다. 스크립트는 매번 버전 쿼리를 붙여 불러오므로 브라우저 캐시 때문에 예전 파일이 섞이지 않습니다. 스냅샷이 30시간보다 오래되면 `⚠ 스냅샷 N일 전 데이터` 경고가 표시됩니다.
