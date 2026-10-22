@@ -71,6 +71,8 @@
     if (level == null) return '';
     const L = LEVELS[level];
     const vixChg = vix && vixPrev ? vix.close - vixPrev.close : null;
+    const vl = U.state.market && U.state.market.vix && U.state.market.vix.live;
+    const vixLive = vl ? new Date(vl.at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }) : null;
     const liveChip = U.finnhub && U.finnhub.hasKey()
       ? chip('VIXY 실시간 <span class="text-[10px]">(VIX ETF)</span>',
         live && live.dp != null ? `${live.dp > 0 ? '+' : live.dp < 0 ? '−' : ''}${Math.abs(live.dp).toFixed(2)}%` : '-',
@@ -89,7 +91,7 @@
         </div>
         <div class="grid min-w-0 flex-1 basis-full grid-cols-2 gap-2 sm:basis-auto ${liveChip ? 'lg:grid-cols-3' : ''}">
           ${chip('VIX 변동성지수', vix ? vix.close.toFixed(2) : '-', lv,
-            vix ? `${vix.date} 종가${vixChg != null ? ` · ${vixChg > 0 ? '+' : vixChg < 0 ? '−' : ''}${Math.abs(vixChg).toFixed(2)}` : ''} · Cboe` : '데이터 없음',
+            vix ? `${vixLive ? `실시간 ${vixLive}` : `${vix.date} 종가`}${vixChg != null ? ` · ${vixChg > 0 ? '+' : vixChg < 0 ? '−' : ''}${Math.abs(vixChg).toFixed(2)}` : ''} · ${vixLive ? 'CNBC' : 'Cboe'}` : '데이터 없음',
             'VIX: 20 미만 안정 · 20~30 유의 · 30 이상 공포')}
           ${chip('공포·탐욕 지수', fg ? Math.round(fg.score) : '-', lf,
             fg ? `${FG_LABEL(fg.score)} · CNN` : '데이터 없음',

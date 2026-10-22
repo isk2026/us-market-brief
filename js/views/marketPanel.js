@@ -103,7 +103,18 @@
         ${spread < 0 ? ui.badge('장단기 금리 역전', 'bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200') : ''}
         ${curve ? ui.badge(curve, 'bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200') : ''}
       </div>`;
-    return card('🏦 미국 국채 금리', r, `<ul class="space-y-3">${rows}</ul>${foot}`);
+    // Intraday market yields (CNBC) next to the Treasury's end-of-day par yields above.
+    const lv = r.live;
+    const liveRow = lv && (lv.y2 || lv.y10 || lv.y30) ? `<p class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+        ${ui.badge('● 장중', 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300')}
+        ${[['y2', '2년'], ['y10', '10년'], ['y30', '30년']].filter(([k]) => lv[k]).map(([k, label]) => {
+          const base = lastOf(r.series[k] || []);
+          const d = base ? Math.round((lv[k].value - base.value) * 100) : null;
+          return `<span>${label} <b class="font-mono tabular-nums text-slate-700 dark:text-slate-200">${fixed(lv[k].value, 3)}%</b>${d == null ? '' : ` <span class="font-mono">(${signed(d, 0)}bp)</span>`}</span>`;
+        }).join('<span>·</span>')}
+        <span class="text-slate-400" title="CNBC 장중 시장금리. 위 값은 미 재무부 종가 기준 par yield라 산출 방식이 조금 다릅니다.">재무부 종가 대비 · CNBC</span>
+      </p>` : '';
+    return card('🏦 미국 국채 금리', r, `<ul class="space-y-3">${rows}</ul>${foot}${liveRow}`);
   }
 
   // ---------- 2. VIX ----------
@@ -334,7 +345,7 @@
         <h2 class="text-base font-bold">시장 지표</h2>
         <p class="text-xs text-slate-500">${m.mock
           ? '샘플 데이터 · <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">node scripts/fetch-market-data.mjs</code> 실행 시 실제 지표로 교체'
-          : `${ui.staleSnapshot(m.generatedAt)} 스냅샷 ${esc(kstStamp(m.generatedAt))} KST · 평일 약 15분마다 자동 갱신 · AAII는 주간`}</p>
+          : `${ui.liveStamp('CNN 공포탐욕·AAII·FRED 유가 현물은 스냅샷 값입니다.')} ${ui.staleSnapshot(m.generatedAt)} 스냅샷 ${esc(kstStamp(m.generatedAt))} KST · 평일 약 15분마다 자동 갱신 · AAII는 주간`}</p>
       </div>`;
     return `<div id="market-panel" class="relative mb-6">
       ${head}

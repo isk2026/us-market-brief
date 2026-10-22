@@ -177,6 +177,14 @@
       return `<span class="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
         title="자동 갱신(GitHub Actions 'Refresh market data', 평일 15분 간격)이 멈췄을 수 있습니다. Actions 실행 기록을 확인하거나 node scripts/fetch-market-data.mjs 로 직접 갱신하세요">⚠ 스냅샷 ${label}</span>`;
     },
+    // Green chip while live quotes (js/live.js) are fresh; '' otherwise (the snapshot time stays visible).
+    liveStamp: (note = '') => {
+      const at = window.UMB.live ? window.UMB.live.lastAt() : 0;
+      if (!at || Date.now() - at > 5 * 60e3) return '';
+      const t = new Date(at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+      return `<span class="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+        title="CNBC 시세를 1분마다 반영합니다(일부 거래소는 제공처 기준 지연). ${esc(note)}">● 실시간 시세 ${esc(t)}</span>`;
+    },
     stars: (n) => `<span class="text-amber-500" title="중요도 ${n}">${'★'.repeat(n)}<span class="text-slate-300 dark:text-slate-600">${'★'.repeat(3 - n)}</span></span>`,
     ticker: (t) => `<span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">${esc(t)}</span>`,
     empty: (msg) => `<p class="py-8 text-center text-sm text-slate-500">${esc(msg)}</p>`,

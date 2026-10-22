@@ -6,6 +6,7 @@
 
   const ROUTES = ['dashboard', 'global', 'macro', 'sector', 'semi', 'news', 'calendar'];
   const REFRESH_MS = 5 * 60 * 1000;
+  const LIVE_MS = 60 * 1000;
   let currentView = null;
 
   // ---------- modal (accessible dialog) / toast ----------
@@ -222,10 +223,35 @@
   window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
 
   // A tab left open overnight would keep yesterday's snapshot; reload when the user comes back after a while.
+  // Coming back sooner (e.g. unlocking the phone) still pulls fresh live quotes right away.
   const STALE_TAB_MS = 10 * 60 * 1000;
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && state.updatedAt && Date.now() - state.updatedAt > STALE_TAB_MS) refresh(false);
+    if (document.hidden) return;
+    if (state.updatedAt && Date.now() - state.updatedAt > STALE_TAB_MS) refresh(false);
+    else refreshLive();
   });
+
+  // Re-render without swapping the view out from under an open dialog (see refresh()).
+  function rerenderSafely() {
+    if (U.isModalOpen()) {
+      renderTicker();
+      renderSourceBadge();
+      pendingRerender = true;
+    } else {
+      U.rerender();
+    }
+  }
+
+  // Live quote overlay (js/live.js) on top of the snapshots; re-render only when something changed.
+  let liveInflight = null;
+  function refreshLive(opts) {
+    if (!U.live || inflight || liveInflight) return liveInflight || Promise.resolve(false);
+    liveInflight = U.live.refresh(opts)
+      .then((applied) => { if (applied) rerenderSafely(); return applied; })
+      .finally(() => { liveInflight = null; });
+    return liveInflight;
+  }
+  U.refreshLive = refreshLive;
 
   // ---------- data ----------
   // One load at a time: a manual ⟳ during an auto refresh joins the in-flight request.
@@ -237,17 +263,13 @@
       renderSourceBadge();
       try {
         await U.api.load();
+        // The reload replaced the snapshot objects: overlay live quotes (fresh fetch on manual ⟳).
+        if (U.live) await U.live.refresh({ force: !!showToast });
       } finally {
         state.loading = false;
       }
       // Don't swap the view out from under an open dialog (news ‹ › ids, focus return); do it on close.
-      if (U.isModalOpen()) {
-        renderTicker();
-        renderSourceBadge();
-        pendingRerender = true;
-      } else {
-        U.rerender();
-      }
+      rerenderSafely();
       if (state.error) U.toast(state.error);
       else if (showToast) U.toast('최신 데이터로 갱신했습니다');
     })().finally(() => { inflight = null; });
@@ -375,6 +397,8 @@
   refresh(false);
   // Snapshots are republished about every 15 min (GitHub Actions), so poll them even without a Finnhub key.
   setInterval(() => { if (!document.hidden) refresh(false); }, REFRESH_MS);
+  // Live quotes (indices, futures, VIX, yields, FX, commodities, stocks) every minute while visible.
+  setInterval(() => { if (!document.hidden) refreshLive(); }, LIVE_MS);
   // Bitcoin trades 24/7: refresh it every minute regardless of data source, touching only the ticker
   // and the dashboard's crypto card (no full re-render, so scroll/expanded state is kept).
   setInterval(async () => {

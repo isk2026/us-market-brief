@@ -205,7 +205,7 @@
       <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 class="text-xl font-bold">글로벌 증시</h1>
-          <p class="mt-0.5 text-xs text-slate-500">${g ? `${ui.staleSnapshot(U.state.market.generatedAt)} 스냅샷 ${esc(new Date(g.asOf || U.state.market.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} KST · Yahoo Finance · 코스피·코스닥 공식 종가는 한국은행 ECOS` : ''}</p>
+          <p class="mt-0.5 text-xs text-slate-500">${g ? `${ui.liveStamp('')} ${ui.staleSnapshot(U.state.market.generatedAt)} 스냅샷 ${esc(new Date(g.asOf || U.state.market.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} KST · Yahoo Finance · 코스피·코스닥 공식 종가는 한국은행 ECOS` : ''}</p>
         </div>
         <button data-gl="table" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">${view.table ? '카드로 보기' : '표로 보기'}</button>
       </div>

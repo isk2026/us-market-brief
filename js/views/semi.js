@@ -41,7 +41,10 @@
     loading = new Promise((resolve) => {
       const s = document.createElement('script');
       s.src = `js/semiData.js?v=${Date.now()}`;
-      s.onload = s.onerror = () => { s.remove(); loadedAt = Date.now(); loading = null; resolve(); };
+      s.onload = s.onerror = () => {
+        s.remove(); loadedAt = Date.now(); loading = null; resolve();
+        if (U.refreshLive) setTimeout(U.refreshLive); // overlay live quotes on the freshly loaded snapshot
+      };
       document.head.appendChild(s);
     });
     return loading;
@@ -495,7 +498,7 @@
       <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 class="text-xl font-bold">반도체</h1>
-          <p class="mt-0.5 text-xs text-slate-500">${ui.staleSnapshot(d.generatedAt)} 스냅샷 ${esc(new Date(d.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} KST ·
+          <p class="mt-0.5 text-xs text-slate-500">${ui.liveStamp('한국 상장 종목과 기간 수익률·재무 지표는 스냅샷 값입니다.')} ${ui.staleSnapshot(d.generatedAt)} 스냅샷 ${esc(new Date(d.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} KST ·
             SOX 구성종목 ${c.count || counts.sox}개(<a href="${esc(c.url || '#')}" target="_blank" rel="noopener noreferrer" class="underline decoration-dotted">${esc(c.asOf || '')} Nasdaq 공식</a>) + 주요 비구성 종목</p>
         </div>
       </div>

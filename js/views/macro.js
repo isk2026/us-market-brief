@@ -24,7 +24,10 @@
     loading = new Promise((resolve) => {
       const s = document.createElement('script');
       s.src = `js/macroData.js?v=${Date.now()}`;
-      s.onload = s.onerror = () => { s.remove(); loadedAt = Date.now(); loading = null; resolve(); };
+      s.onload = s.onerror = () => {
+        s.remove(); loadedAt = Date.now(); loading = null; resolve();
+        if (U.refreshLive) setTimeout(U.refreshLive); // overlay live quotes on the freshly loaded snapshot
+      };
       document.head.appendChild(s);
     });
     return loading;
@@ -270,7 +273,7 @@
       <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 class="text-xl font-bold">채권·금리·환율·원자재</h1>
-          <p class="mt-0.5 text-xs text-slate-500">${ui.staleSnapshot(d.generatedAt)} 스냅샷 ${esc(new Date(d.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} KST · 미 재무부 · FRED·ECB(스킬) · Yahoo Finance</p>
+          <p class="mt-0.5 text-xs text-slate-500">${ui.liveStamp('미 국채 수익률 곡선·FRED 지표는 스냅샷 값입니다.')} ${ui.staleSnapshot(d.generatedAt)} 스냅샷 ${esc(new Date(d.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} KST · 미 재무부 · FRED·ECB(스킬) · Yahoo Finance</p>
         </div>
         <div class="no-scrollbar flex gap-2 overflow-x-auto">${jump}</div>
       </div>
