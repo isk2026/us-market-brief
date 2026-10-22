@@ -100,10 +100,17 @@ async function runSkill(subcommand, args = []) {
   return json;
 }
 
-// FRED via the skill: { id: [{date, value}] } with nulls dropped.
+// FRED: the skill first, then FRED's public CSV directly (GitHub Actions has no skill installed).
+// { id: [{date, value}] } with nulls dropped.
 async function fredSeries(ids, last) {
-  const j = await runSkill('series', ['--ids', ids.join(','), '--last', String(last)]);
+  let j;
+  try {
+    j = await runSkill('series', ['--ids', ids.join(','), '--last', String(last)]);
+  } catch (skillErr) {
+    return fredDirect(ids, last).catch((err) => { throw new Error(`${skillErr.message} / direct: ${err.message}`); });
+  }
   const out = Object.fromEntries(ids.map((id) => [id, []]));
+  Object.defineProperty(out, 'via', { value: SKILL_TAG });
   for (const row of j.rows) {
     for (const id of ids) {
       const v = row.values ? row.values[id] : null;
@@ -111,6 +118,34 @@ async function fredSeries(ids, last) {
     }
   }
   return out;
+}
+
+// One CSV per id (a multi-id request comes back as a ZIP). FRED stalls on browser-like user agents,
+// so this sends a plain tool UA. ~3 years back covers `last` daily points or monthly OECD rows.
+async function fredDirect(ids, last) {
+  const from = shiftKey(new Date().toISOString().slice(0, 10), 3 * 365);
+  const out = {};
+  Object.defineProperty(out, 'via', { value: 'direct' });
+  await pool(ids, 2, async (id) => {
+    const text = await getText(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${from}`,
+      { headers: { 'User-Agent': 'us-market-brief/1.0 (+https://github.com/isk2026/us-market-brief)' } });
+    const rows = text.trim().split(/\r?\n/).slice(1).map((l) => l.split(','))
+      .map(([date, v]) => ({ date, value: parseFloat(v) }))
+      .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.date) && !Number.isNaN(p.value));
+    if (!rows.length) throw new Error(`FRED ${id}: no observations`);
+    out[id] = rows.slice(-last).map((p) => ({ date: p.date, value: round(p.value, 3) }));
+  });
+  skillUsed.add('fred-direct');
+  return out;
+}
+
+// Same rule as the skill's classify_curve: 1-day 2Y/10Y moves → bear/bull steepening/flattening.
+function classifyCurve(d2, d10) {
+  if (d2 == null || d10 == null) return null;
+  if ((Math.abs(d2) < 0.05 && Math.abs(d10) < 0.05) || Math.abs(d2 - d10) < 0.05) return 'flat';
+  if (d2 > 0 && d10 > 0) return d2 > d10 ? 'bear_flattening' : 'bear_steepening';
+  if (d2 < 0 && d10 < 0) return Math.abs(d2) > Math.abs(d10) ? 'bull_steepening' : 'bull_flattening';
+  return 'mixed';
 }
 const latest = (s) => (s && s.length ? s[s.length - 1] : null);
 const fredPoint = (s, keep = KEEP_RATES) => {
@@ -176,17 +211,20 @@ async function fetchRates(prev) {
     policy: null, real10y: null, breakeven10y: null, credit: { hy: null, ig: null }, global10y: [],
   };
 
-  // Curve shape label from the skill (bear_steepen, bull_flatten, mixed, …).
+  // Curve shape label from the skill (bear_steepening, bull_flattening, mixed, …); same rule locally without it.
   try {
     const y = await runSkill('yields', ['--last', '5']);
     rates.spreads.curveLabel = y.rows[y.rows.length - 1].curve || null;
-  } catch (err) { errors['rates.curveLabel'] = err.message; }
+  } catch {
+    const p = rows[rows.length - 2];
+    rates.spreads.curveLabel = p ? classifyCurve(bp(last['2Y'], p['2Y']), bp(last['10Y'], p['10Y'])) : null;
+  }
 
-  // FRED via the skill.
+  // FRED via the skill (direct CSV fallback inside fredSeries).
   try {
     const f = await fredSeries(['DFEDTARU', 'DFEDTARL'], 10);
     const u = latest(f.DFEDTARU), l = latest(f.DFEDTARL);
-    rates.policy = u && l ? { upper: u.value, lower: l.value, asOf: u.date, source: `FRED DFEDTARU/DFEDTARL (${SKILL_TAG})` } : null;
+    rates.policy = u && l ? { upper: u.value, lower: l.value, asOf: u.date, source: `FRED DFEDTARU/DFEDTARL (${f.via})` } : null;
     if (!rates.policy) errors['rates.policy'] = 'no observations';
   } catch (err) { errors['rates.policy'] = err.message; rates.policy = prev?.rates?.policy ? { ...prev.rates.policy, stale: true } : null; }
 
@@ -212,7 +250,7 @@ async function fetchRates(prev) {
     const f = await fredSeries(OECD.map((o) => o[2]), 6);
     for (const [country, label, id] of OECD) {
       const l = latest(f[id]);
-      if (l) rates.global10y.push({ country, label, value: round(l.value, 2), asOf: l.date, frequency: 'monthly', source: `OECD via FRED ${id} (${SKILL_TAG})` });
+      if (l) rates.global10y.push({ country, label, value: round(l.value, 2), asOf: l.date, frequency: 'monthly', source: `OECD via FRED ${id} (${f.via})` });
       else errors[`rates.global10y.${country}`] = 'no observations';
     }
   } catch (err) {

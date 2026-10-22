@@ -1,0 +1,72 @@
+# Near-real-time data: re-runs the four snapshot fetchers and deploys the site to GitHub Pages.
+# Snapshots are deployed as a Pages artifact (not committed), so the repo history is not flooded;
+# the local 07:00 task still commits a daily copy. Each run first restores the newest published
+# snapshots so failed sections keep their latest values (scripts/restore-published-snapshots.mjs).
+#
+# Cron is UTC and GitHub may start scheduled runs several minutes late.
+#   Mon–Fri every 15 min   Asia, Europe and US pre-market → after-hours (00:00–24:00 UTC)
+#   Sat 00:00–00:45        tail of US Friday after-hours
+#   Sun 22:00–23:45        CME futures reopen
+#   Sat/Sun every 6 h      news, earnings calendar, weekend checks
+name: Refresh market data
+
+on:
+  schedule:
+    - cron: '*/15 * * * 1-5'
+    - cron: '*/15 0 * * 6'
+    - cron: '*/15 22-23 * * 0'
+    - cron: '0 */6 * * 0,6'
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  refresh-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      PAGES_URL: https://isk2026.github.io/us-market-brief
+      WATCHLIST: AAPL,NVDA,MSFT,TSLA
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Restore newest published snapshots
+        run: node scripts/restore-published-snapshots.mjs
+
+      # Each fetcher keeps the previous values for anything that fails, so one failing source never
+      # blocks the deploy.
+      - name: Market indicators (rates, VIX, oil, Fear & Greed, AAII, earnings, global indices)
+        run: node scripts/fetch-market-data.mjs
+        continue-on-error: true
+      - name: Bonds, FX and commodities
+        run: node scripts/fetch-macro-data.mjs
+        continue-on-error: true
+      - name: Sector ETFs
+        run: node scripts/fetch-sector-data.mjs
+        continue-on-error: true
+      - name: Semiconductors
+        run: node scripts/fetch-semi-data.mjs
+        continue-on-error: true
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: .
+      - id: deploy
+        uses: actions/deploy-pages@v4

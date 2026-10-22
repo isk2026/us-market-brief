@@ -9,7 +9,7 @@
   const U = window.UMB;
   const { esc, ui } = U;
 
-  const RELOAD_MS = 10 * 60 * 1000;
+  const RELOAD_MS = 4 * 60 * 1000; // snapshots refresh about every 15 min (GitHub Actions)
   const COMMODITY_GROUPS = [['energy', '에너지'], ['metals', '금속'], ['agri', '농산물']];
 
   let root = null;
@@ -114,7 +114,7 @@
     }).join('');
     const s = d.rates.spreads || {};
     const p = d.rates.policy;
-    const CURVE = { bear_steepen: '베어 스티프닝 (장기금리 주도 상승)', bull_steepen: '불 스티프닝 (단기금리 주도 하락)', bear_flatten: '베어 플래트닝 (단기금리 주도 상승)', bull_flatten: '불 플래트닝 (장기금리 주도 하락)' };
+    const CURVE = { bear_steepening: '베어 스티프닝 (장기금리 주도 상승)', bull_steepening: '불 스티프닝 (단기금리 주도 하락)', bear_flattening: '베어 플래트닝 (단기금리 주도 상승)', bull_flattening: '불 플래트닝 (장기금리 주도 하락)' };
     const chips = [
       s.s2s10 ? ui.badge(`2s10s ${bp(s.s2s10.value)}`, s.s2s10.value < 0 ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200') : '',
       s.s3m10y ? ui.badge(`3M–10Y ${bp(s.s3m10y.value)}`, s.s3m10y.value < 0 ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200') : '',

@@ -373,7 +373,8 @@
   syncHeaderHeight();
   render();
   refresh(false);
-  setInterval(() => { if (state.source === 'live' && !document.hidden) refresh(false); }, REFRESH_MS);
+  // Snapshots are republished about every 15 min (GitHub Actions), so poll them even without a Finnhub key.
+  setInterval(() => { if (!document.hidden) refresh(false); }, REFRESH_MS);
   // Bitcoin trades 24/7: refresh it every minute regardless of data source, touching only the ticker
   // and the dashboard's crypto card (no full re-render, so scroll/expanded state is kept).
   setInterval(async () => {

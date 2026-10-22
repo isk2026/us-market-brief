@@ -125,6 +125,7 @@ async function ratesFromSkill() {
       spread_2s10s_bp: last.spread_2s10s_bp ?? null,
       d_y2_bp: last.d_y2_bp ?? null,
       d_y10_bp: last.d_y10_bp ?? null,
+      d_spread_2s10s_bp: last.d_spread_2s10s_bp ?? null,
       curve: last.curve ?? null,
     },
   };
@@ -165,12 +166,32 @@ async function fetchRates() {
   if (!data.length) throw new Error('Treasury CSV had no rows');
   const series = Object.fromEntries(Object.entries(cols).map(([key, col]) => [key,
     lastN(data.map(({ date, r }) => ({ date, value: num(r[col]) })).filter((p) => p.value != null))]));
+  // Same `latest` fields the skill's `yields` rows carry (spread, 1-day bp moves, curve shape).
+  const [p, c] = data.slice(-2).map(({ r }) => ({ y2: num(r[cols.y2]), y10: num(r[cols.y10]) }));
+  const d = (a, b) => (a != null && b != null ? round((a - b) * 100, 1) : null);
+  const dy2 = p && c ? d(c.y2, p.y2) : null, dy10 = p && c ? d(c.y10, p.y10) : null;
   return {
     asOf: data[data.length - 1].date,
     source: 'U.S. Treasury (direct)',
     url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve',
     series,
+    latest: {
+      spread_2s10s_bp: c ? d(c.y10, c.y2) : null,
+      d_y2_bp: dy2,
+      d_y10_bp: dy10,
+      d_spread_2s10s_bp: dy2 != null && dy10 != null ? round(dy10 - dy2, 1) : null,
+      curve: classifyCurve(dy2, dy10),
+    },
   };
+}
+
+// Same rule as the skill's classify_curve (1-day 2Y/10Y bp moves).
+function classifyCurve(d2, d10) {
+  if (d2 == null || d10 == null) return null;
+  if ((Math.abs(d2) < 0.05 && Math.abs(d10) < 0.05) || Math.abs(d2 - d10) < 0.05) return 'flat';
+  if (d2 > 0 && d10 > 0) return d2 > d10 ? 'bear_flattening' : 'bear_steepening';
+  if (d2 < 0 && d10 < 0) return Math.abs(d2) > Math.abs(d10) ? 'bull_steepening' : 'bull_flattening';
+  return 'mixed';
 }
 
 async function yahooChart(symbol, range = '3mo') {
@@ -299,6 +320,31 @@ function aaiiDate(label, today = new Date()) {
   if (Number.isNaN(d.getTime())) return null;
   if (d > today) d.setFullYear(d.getFullYear() - 1);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// AAII runs its survey Thursday→Wednesday and publishes it on Thursday (US Eastern); the table is
+// labelled with the Wednesday. Date (YYYY-MM-DD) of the newest survey that should be out by `now`.
+function aaiiExpectedDate(now = Date.now()) {
+  const today = nyDate(now);
+  const dow = new Date(`${today}T12:00:00Z`).getUTCDay();
+  const back = dow >= 4 ? dow - 3 : dow + 4; // Thu–Sat → this Wednesday, Sun–Wed → last week's
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - back);
+  return d.toISOString().slice(0, 10);
+}
+
+// Weekly data: between Thursday releases the previous result is still current, so it is reused
+// instead of scraping aaii.com on every 15-minute run. From Thursday on it is fetched until the
+// new week shows up.
+async function fetchAaiiWeekly() {
+  const old = previousSnapshot.aaii;
+  const expected = aaiiExpectedDate();
+  if (old && old.bullish != null && old.asOf >= expected) {
+    const { stale, note, ...rest } = old;
+    return { ...rest, expected, reused: true };
+  }
+  const fresh = await fetchAaii();
+  return { ...fresh, expected, checkedAt: new Date().toISOString() };
 }
 
 async function fetchAaii() {
@@ -521,7 +567,8 @@ async function fetchGlobalIndices() {
   results.forEach((r, i) => {
     const def = GLOBAL_INDICES[i];
     if (!r.ok) { extraErrors[`globalIndices.${def.key}`] = r.error?.message || String(r.error); return; }
-    const off = official[def.key];
+    // Without ECOS (e.g. on GitHub Actions, where the skill is not installed) keep the last official close.
+    const off = official[def.key] || previousSnapshot.globalIndices?.items?.find((it) => it.key === def.key)?.official;
     items.push(off ? { ...r.value, official: off } : r.value);
   });
   if (!items.length) throw new Error('all global index fetches failed');
@@ -549,7 +596,7 @@ const SECTIONS = {
   vix: () => withFallback(vixFromSkill, fetchVix),
   oil: fetchOilSection,
   fearGreed: fetchFearGreed,
-  aaii: fetchAaii,
+  aaii: fetchAaiiWeekly,
   earnings: fetchEarnings,
   crypto: fetchCrypto,
   globalIndices: fetchGlobalIndices,
@@ -589,8 +636,11 @@ function latestLabel(key, s) {
   }
 }
 
+// Previous snapshot, for sections that reuse or carry over earlier values (AAII, ECOS closes).
+let previousSnapshot = {};
+
 async function main() {
-  const previous = await readPrevious();
+  const previous = previousSnapshot = await readPrevious();
   const results = await Promise.allSettled(Object.values(SECTIONS).map((fn) => fn()));
   const data = { generatedAt: new Date().toISOString() };
   const errors = {};
@@ -602,7 +652,7 @@ async function main() {
     if (r.status === 'fulfilled') {
       data[key] = r.value;
       ok++;
-      summary.push({ section: key, status: r.value.note && key !== 'earnings' && key !== 'globalIndices' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
+      summary.push({ section: key, status: r.value.reused ? 'ok (weekly, reused)' : r.value.note && key !== 'earnings' && key !== 'globalIndices' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
       return;
     }
     const message = r.reason?.message || String(r.reason);

@@ -22,7 +22,7 @@
     { key: '000660.KS', label: 'SK하이닉스', color: 'var(--c4)' },
     { key: 'NVDA', label: 'NVIDIA', color: 'var(--c5)' },
   ];
-  const RELOAD_MS = 10 * 60 * 1000;
+  const RELOAD_MS = 4 * 60 * 1000; // snapshots refresh about every 15 min (GitHub Actions)
 
   const view = { filter: 'all', segment: 'all', sort: 'marketCapUsd', dir: -1, mode: 'cards' };
   let root = null;

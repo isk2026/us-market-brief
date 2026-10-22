@@ -168,13 +168,14 @@
         title="실제 EPS ${esc(ev.actual)} · 예상 ${esc(ev.forecast ?? '-')}${ev.surpriseSource === 'finnhub' ? ' · Finnhub Earnings Surprises' : ''}">
         <span aria-hidden="true">${kind[0]}</span>${kind[1]}${pctText}</span>`;
     },
-    // Warning chip when the market snapshot (js/marketData.js) is older than `hours`.
-    staleSnapshot: (iso, hours = 30) => {
+    // Warning chip when a snapshot is older than `hours`. GitHub Actions refreshes them every ~15 min on
+    // weekdays and every 6 h on weekends, so 8 h without an update means the refresh has stalled.
+    staleSnapshot: (iso, hours = 8) => {
       const age = iso ? (Date.now() - Date.parse(iso)) / 3600e3 : Infinity;
       if (age < hours) return '';
       const label = Number.isFinite(age) ? `${age >= 48 ? `${Math.floor(age / 24)}일` : `${Math.floor(age)}시간`} 전 데이터` : '수집 시각 알 수 없음';
       return `<span class="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
-        title="node scripts/fetch-market-data.mjs 로 갱신하거나 매일 07:00 예약 작업을 확인하세요">⚠ 스냅샷 ${label}</span>`;
+        title="자동 갱신(GitHub Actions 'Refresh market data', 평일 15분 간격)이 멈췄을 수 있습니다. Actions 실행 기록을 확인하거나 node scripts/fetch-market-data.mjs 로 직접 갱신하세요">⚠ 스냅샷 ${label}</span>`;
     },
     stars: (n) => `<span class="text-amber-500" title="중요도 ${n}">${'★'.repeat(n)}<span class="text-slate-300 dark:text-slate-600">${'★'.repeat(3 - n)}</span></span>`,
     ticker: (t) => `<span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">${esc(t)}</span>`,

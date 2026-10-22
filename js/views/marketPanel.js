@@ -75,7 +75,7 @@
     `<p class="py-6 text-center text-sm text-slate-500">데이터를 불러오지 못했습니다.${(U.state.market?.errors || {})[key] ? `<br><span class="text-xs">${esc(U.state.market.errors[key])}</span>` : ''}</p>`);
 
   // ---------- 1. Treasury yields ----------
-  const CURVE = { bear_steepen: '베어 스티프닝', bull_steepen: '불 스티프닝', bear_flatten: '베어 플래트닝', bull_flatten: '불 플래트닝' };
+  const CURVE = { bear_steepening: '베어 스티프닝', bull_steepening: '불 스티프닝', bear_flattening: '베어 플래트닝', bull_flattening: '불 플래트닝' };
 
   function ratesCard(r) {
     if (!r || !r.series) return missing('미국 국채 금리', 'rates');
@@ -252,6 +252,26 @@
     { key: 'bearish', label: '약세', color: 'var(--bear)' },
   ];
 
+  // AAII surveys Thursday→Wednesday (results labelled with the Wednesday) and publishes on Thursday,
+  // US Eastern time. Release schedule line + a "waiting" chip once the next Thursday has come.
+  const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const plusDays = (key, n) => { const d = new Date(`${key}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d; };
+  const md = (d) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${DOW[d.getUTCDay()]})`;
+  function aaiiSchedule(s) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.asOf || '')) return '';
+    const next = plusDays(s.asOf, 8);
+    const nyToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+    const waiting = nyToday >= next.toISOString().slice(0, 10);
+    return `<div class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+        ${ui.badge('주간 · 매주 목요일 발표', 'bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200')}
+        <span>설문 마감 ${md(plusDays(s.asOf, 0))} · 발표 ${md(plusDays(s.asOf, 1))}</span>
+        <span>·</span>
+        ${waiting
+          ? ui.badge(`${md(next)} 발표분 확인 중`, 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300')
+          : `<span>다음 발표 <b>${md(next)}</b> <span class="text-slate-400">(미 동부 기준)</span></span>`}
+      </div>`;
+  }
+
   function aaiiCard(s) {
     if (!s || s.bullish == null) return missing('AAII 개인투자자 심리', 'aaii');
     const avg = s.averages || { bullish: 37.5, neutral: 31.5, bearish: 31.0 };
@@ -300,6 +320,7 @@
           <div class="mt-0.5 flex justify-between text-[10px] text-slate-400"><span>${esc(shortDate(hist[0].date))}</span><span>${esc(shortDate(lastOf(hist).date))}</span></div>
         </div>` : ''}
       </div>
+      ${aaiiSchedule(s)}
       <p class="mt-2 text-xs text-slate-500">미국개인투자자협회(AAII) 회원 대상 주간 설문: 향후 6개월 주식시장 전망.</p>`;
     return card('🗳 AAII 개인투자자 심리 <span class="font-normal text-slate-400">Sentiment Survey</span>', s, body);
   }
@@ -313,7 +334,7 @@
         <h2 class="text-base font-bold">시장 지표</h2>
         <p class="text-xs text-slate-500">${m.mock
           ? '샘플 데이터 · <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">node scripts/fetch-market-data.mjs</code> 실행 시 실제 지표로 교체'
-          : `${ui.staleSnapshot(m.generatedAt)} 스냅샷 ${esc(kstStamp(m.generatedAt))} KST · 금리·VIX·유가는 multi-asset-morning-briefing 스킬 데이터`}</p>
+          : `${ui.staleSnapshot(m.generatedAt)} 스냅샷 ${esc(kstStamp(m.generatedAt))} KST · 평일 약 15분마다 자동 갱신 · AAII는 주간`}</p>
       </div>`;
     return `<div id="market-panel" class="relative mb-6">
       ${head}

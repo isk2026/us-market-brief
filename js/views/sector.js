@@ -15,7 +15,7 @@
     sensitive: { label: '경기민감·성장', hint: '경기와 기술 사이클에 함께 반응 (기술·커뮤니케이션·산업재·에너지)', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300' },
     defensive: { label: '방어', hint: '경기와 무관한 수요, 하락장에서 상대적으로 덜 빠지는 경향 (유틸리티·필수소비재·헬스케어)', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300' },
   };
-  const RELOAD_MS = 10 * 60 * 1000;
+  const RELOAD_MS = 4 * 60 * 1000; // snapshots refresh about every 15 min (GitHub Actions)
 
   const view = { period: 'm1', sort: 'period', dir: -1 };
   let root = null;

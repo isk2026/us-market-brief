@@ -72,7 +72,10 @@ node scripts/fetch-market-data.mjs   # js/marketData.js 갱신
 
 - **주요 기업 실적:** 대시보드 카드에서 [발표 예정] / [최근 발표] 탭과 [전체 / 대형주 $200B+ / 관심종목] 필터로 볼 수 있고, 캘린더 탭에도 같은 일정이 들어갑니다. 무료 Nasdaq 캘린더에는 실제 EPS가 없어 발표된 실적은 '발표 완료 · 결과 보기' 링크로 표시합니다(Finnhub 키를 넣은 실시간 모드에서는 실제 EPS 표시). 발표 시각은 장 전/장 후만 제공됩니다.
 
-- **자동 갱신:** Windows 작업 스케줄러 작업 `USMarketBrief - Market Data`가 매일 07:00(KST)에 `scripts/update-market-data.cmd`를 실행합니다. PC가 꺼져 있었다면 다음에 켜질 때 실행되며, 로그는 `logs/market-data.log`에 쌓입니다.
+- **준실시간 갱신 (GitHub Actions):** `.github/workflows/refresh-data.yml`이 평일 15분마다(토 새벽 미국 시간외·일 저녁 선물 재개 포함, 주말은 6시간마다) 4개 수집 스크립트를 실행하고 GitHub Pages에 바로 배포합니다. 데이터는 커밋하지 않고 Pages 아티팩트로만 올리며, 매 실행 전에 `scripts/restore-published-snapshots.mjs`가 배포 중인 최신 스냅샷을 "이전 값"으로 복원합니다. 열어 둔 화면은 Finnhub 키가 없어도 5분마다 새 스냅샷을 읽습니다. Actions에는 스킬이 없으므로 FRED는 공개 CSV로 직접 받고, 한국은행 ECOS 공식 종가는 직전 값을 유지합니다(로컬 07:00 작업이 갱신). 스냅샷이 8시간 넘게 갱신되지 않으면 경고가 표시됩니다.
+  - **AAII 개인투자자 심리는 주간 데이터**입니다(목~수 설문, 수요일 날짜로 목요일 발표·미 동부 기준). 직전 결과가 이번 주 것이면 다시 조회하지 않고, 목요일부터 새 결과가 나올 때까지만 조회합니다. 카드에 설문 마감일·발표일·다음 발표일이 표시됩니다.
+  - 공개 저장소의 예약 워크플로는 60일간 저장소 활동이 없으면 GitHub가 자동으로 꺼집니다(로컬 07:00 커밋이 있으면 유지).
+- **자동 갱신 (로컬):** Windows 작업 스케줄러 작업 `USMarketBrief - Market Data`가 매일 07:00(KST)에 `scripts/update-market-data.cmd`를 실행합니다. PC가 꺼져 있었다면 다음에 켜질 때 실행되며, 로그는 `logs/market-data.log`에 쌓입니다.
   - 수집이 성공하면 `js/marketData.js`만 `data: market snapshot YYYY-MM-DD`로 커밋해 `origin/master`에 push하고, GitHub Pages(https://isk2026.github.io/us-market-brief/)가 새 데이터로 재배포됩니다. 수집 실패, `master`가 아닌 브랜치, 변경 없음일 때는 건너뜁니다. 다른 작업 중인 파일은 커밋되지 않습니다.
   - 지금 실행: `Start-ScheduledTask -TaskName "USMarketBrief - Market Data"`
   - 해제: `Unregister-ScheduledTask -TaskName "USMarketBrief - Market Data" -Confirm:$false`

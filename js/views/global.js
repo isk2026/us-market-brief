@@ -222,7 +222,7 @@
       : `<div class="mb-8">${moversChart(vis)}</div>${REGIONS.map((r) => regionSection(vis, r)).join('')}`;
     root.innerHTML = `<div id="global-root" class="relative">${head}${body}
       <div data-chart-tip role="tooltip" class="pointer-events-none fixed z-50 hidden max-w-xs rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-white dark:text-slate-900"></div>
-      <p class="mt-2 text-xs text-slate-500">개장 상태는 각 거래소 정규장 시간 기준이며 공휴일은 반영하지 않습니다. 가격은 스냅샷 시점 값입니다(매일 07:00 KST 갱신).</p>
+      <p class="mt-2 text-xs text-slate-500">개장 상태는 각 거래소 정규장 시간 기준이며 공휴일은 반영하지 않습니다. 가격은 스냅샷 시점 값입니다(평일 약 15분마다 자동 갱신, Yahoo Finance 시세 자체도 지연될 수 있음).</p>
     </div>`;
     detachHover = U.charts.attachChartHover(root.querySelector('#global-root'));
   }
