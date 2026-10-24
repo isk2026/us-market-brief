@@ -467,10 +467,10 @@
     const today = U.dateKey(new Date());
     const list = stocks.filter((s) => s.nextEarnings && s.nextEarnings >= today).sort((a, b) => a.nextEarnings.localeCompare(b.nextEarnings)).slice(0, 12);
     if (!list.length) return '';
-    return `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    return `<section class="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       ${ui.sectionTitle('다가오는 반도체 실적', '<a href="#/calendar" class="text-sm text-indigo-600 hover:underline dark:text-indigo-400">캘린더 →</a>')}
-      <ul class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">${list.map((s) => `<li class="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-        <span class="w-24 shrink-0 text-xs text-slate-500">${esc(U.formatDateKo(s.nextEarnings))}</span>
+      <ul class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">${list.map((s) => `<li class="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+        <span class="w-[5.5rem] shrink-0 text-xs text-slate-500 sm:w-24">${esc(U.formatDateKo(s.nextEarnings))}</span>
         ${ui.ticker(s.ticker)}<span class="min-w-0 flex-1 truncate">${esc(name(s))}</span>
         <span class="shrink-0 text-xs text-slate-500">${s.earningsSession ? U.SESSIONS[s.earningsSession] : ''}</span></li>`).join('')}</ul>
     </section>`;
