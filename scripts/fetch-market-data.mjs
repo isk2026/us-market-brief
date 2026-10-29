@@ -8,7 +8,8 @@
  * Primary source for rates / vix / oil is the installed `multi-asset-morning-briefing` skill's
  * helper (scripts/market_data.py: U.S. Treasury, Cboe, FRED). If Python or the skill is missing,
  * or a call fails, the direct fetchers below are used instead. fearGreed (CNN) and aaii (AAII
- * Sentiment Survey) are not covered by the skill and are always fetched directly.
+ * Sentiment Survey) are not covered by the skill and are always fetched directly, as are the Nasdaq
+ * earnings and US economic calendars (actual EPS / actual figures appear once released).
  * Override the helper location with MARKET_DATA_PY (and the interpreter with PYTHON).
  *
  * A failed section keeps the previous snapshot's value marked `stale: true`; nothing is ever fabricated.
@@ -59,6 +60,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const usDate = (s) => { const [m, d, y] = s.trim().split('/').map(Number); return `${y}-${pad(m)}-${pad(d)}`; };
 const num = (s) => { const v = parseFloat(String(s ?? '').replace(/[,%]/g, '')); return Number.isFinite(v) ? v : null; };
 const round = (v, digits = 2) => (v == null ? null : Math.round(v * 10 ** digits) / 10 ** digits);
+const nyTime = (ms) => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
 const nyDate = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 const lastN = (arr, n = KEEP) => arr.slice(-n);
 
@@ -416,8 +418,9 @@ async function earningsDay(date) {
     epsForecast: money(r.epsForecast),
     noOfEsts: num(r.noOfEsts),
     lastYearEPS: money(r.lastYearEPS),
-    epsActual: null,
-    surprisePct: null,
+    // Reported rows carry the actual EPS and surprise as soon as Nasdaq records the release.
+    epsActual: money(r.eps),
+    surprisePct: num(r.surprise),
   })).filter((r) => r.symbol);
 }
 
@@ -466,17 +469,23 @@ async function fetchEarnings() {
   const items = dedupeShareClasses(rows)
     .sort((a, b) => a.date.localeCompare(b.date) || (b.marketCap ?? 0) - (a.marketCap ?? 0));
 
-  // Already reported: past dates, or today's pre-market reports.
-  const reported = items.filter((it) => it.date < today || (it.date === today && it.session === 'bmo'));
-  const surprises = await mapLimit(reported, 3, earningsSurprise, 100);
-  let matched = 0;
-  surprises.forEach((s, i) => {
-    if (s.ok && s.value) { Object.assign(reported[i], s.value); matched++; }
-  });
+  // Past rows lose their session ('time-not-supplied'); keep the one seen before the release.
+  const prevSession = new Map((previousSnapshot.earnings?.items || []).map((it) => [`${it.symbol}|${it.date}`, it.session]));
+  for (const it of items) if (!it.session) it.session = prevSession.get(`${it.symbol}|${it.date}`) || null;
+
+  // Already reported (past dates, today's pre-market, today's after-hours once the US close has passed)
+  // but still without an actual EPS in the calendar → ask the earnings-surprise table.
+  const afterClose = nyTime(Date.now()) >= '16:00';
+  const due = (it) => it.date < today || (it.date === today && (it.session === 'bmo' || afterClose));
+  const reported = items.filter(due);
+  const missing = reported.filter((it) => it.epsActual == null);
+  const surprises = await mapLimit(missing, 3, earningsSurprise, 100);
+  surprises.forEach((s, i) => { if (s.ok && s.value) Object.assign(missing[i], s.value); });
+  const matched = reported.filter((it) => it.epsActual != null).length;
 
   const notes = [];
   if (failedDates.length) notes.push(`${failedDates.length}/${dates.length} calendar dates failed (${failedDates.join(', ')})`);
-  if (reported.length && matched === 0) notes.push(`actual EPS unavailable: Nasdaq earnings-surprise returned no records for ${reported.length} reported items`);
+  if (reported.length && matched === 0) notes.push(`actual EPS unavailable for ${reported.length} reported items`);
   else if (reported.length) notes.push(`actual EPS matched for ${matched}/${reported.length} reported items`);
 
   return {
@@ -488,6 +497,127 @@ async function fetchEarnings() {
     minMarketCap: MIN_MARKET_CAP,
     items,
     ...(notes.length ? { note: notes.join('; ') } : {}),
+  };
+}
+
+// ---------- US economic calendar (Nasdaq; actual / consensus / previous) ----------
+// Only notable US releases are kept. Nasdaq's "gmt" column is not GMT: it is New York time at the UTC
+// offset in effect on the request day (fetched in October, November's 08:30 EST releases show as 09:30),
+// so each time is shifted back to UTC with that offset and re-expressed in New York time for its date.
+// name → [title, importance 1–3, type, detail]
+const ECON_EVENTS = {
+  'Fed Interest Rate Decision': ['FOMC 기준금리 결정', 3, 'fed', '연방공개시장위원회 기준금리(상단) 결정.'],
+  'FOMC Statement': ['FOMC 성명서', 3, 'fed', '통화정책 성명서 공개.'],
+  'FOMC Press Conference': ['연준 의장 기자회견', 3, 'fed', '금리 결정 배경과 향후 정책 방향에 대한 질의응답.'],
+  'FOMC Meeting Minutes': ['FOMC 의사록 공개', 2, 'fed', '직전 회의 의사록.'],
+  'Beige Book': ['베이지북', 2, 'fed', '연준 지역 경기 동향 보고서.'],
+  'Nonfarm Payrolls': ['비농업 고용 (NFP)', 3, 'economic', '월간 고용 보고서의 비농업 일자리 증감.'],
+  'Unemployment Rate': ['실업률', 3, 'economic', '월간 고용 보고서 실업률.'],
+  'Average Hourly Earnings': ['평균 시간당 임금', 2, 'economic', '임금 상승률. 서비스 물가의 선행 지표.'],
+  'CPI': ['소비자물가지수 (CPI)', 3, 'economic', '헤드라인 CPI. 연준 금리 경로의 핵심 변수.'],
+  'Core CPI': ['근원 CPI', 3, 'economic', '식품·에너지 제외 CPI.'],
+  'PPI': ['생산자물가지수 (PPI)', 2, 'economic', '생산자 단계 물가. CPI의 선행 지표.'],
+  'Core PPI': ['근원 PPI', 2, 'economic', '식품·에너지 제외 PPI.'],
+  'PCE Price index': ['PCE 물가지수', 3, 'economic', '연준이 선호하는 물가 지표.'],
+  'Core PCE Price Index': ['근원 PCE 물가지수', 3, 'economic', '식품·에너지 제외 PCE. 연준 물가 목표의 기준.'],
+  'Personal Income': ['개인소득', 2, 'economic', '가계 소득의 전월 대비 변화.'],
+  'Personal Spending': ['개인소비지출', 2, 'economic', '가계 소비의 전월 대비 변화.'],
+  'GDP': ['GDP 성장률 (QoQ 연율)', 3, 'economic', '분기 국내총생산 성장률.'],
+  'Retail Sales': ['소매판매', 3, 'economic', '미국 소비 경기의 핵심 지표.'],
+  'Core Retail Sales': ['근원 소매판매 (자동차 제외)', 2, 'economic', '자동차 제외 소매판매.'],
+  'ISM Manufacturing PMI': ['ISM 제조업 PMI', 3, 'economic', '50 이상이면 제조업 확장 국면.'],
+  'ISM Non-Manufacturing PMI': ['ISM 서비스업 PMI', 3, 'economic', '서비스업 경기 체감 지수.'],
+  'S&P Global Manufacturing PMI': ['S&P 글로벌 제조업 PMI', 1, 'economic', '제조업 구매관리자지수.'],
+  'S&P Global Services PMI': ['S&P 글로벌 서비스업 PMI', 1, 'economic', '서비스업 구매관리자지수.'],
+  'JOLTS Job Openings': ['JOLTS 구인건수', 2, 'economic', '노동 수요를 보여주는 구인 건수.'],
+  'ADP Nonfarm Employment Change': ['ADP 민간고용 변화', 2, 'economic', '공식 고용보고서에 앞서 발표되는 민간 고용 지표.'],
+  'Initial Jobless Claims': ['신규 실업수당 청구건수', 2, 'economic', '노동시장 흐름을 가장 빠르게 보여주는 주간 지표.'],
+  'Continuing Jobless Claims': ['연속 실업수당 청구건수', 1, 'economic', '실업수당을 계속 받는 인원.'],
+  'Challenger Job Cuts': ['챌린저 감원 발표', 1, 'economic', '기업들이 발표한 감원 규모.'],
+  'CB Consumer Confidence': ['컨퍼런스보드 소비자신뢰지수', 2, 'economic', '소비자의 현재 상황 및 향후 기대 평가.'],
+  'Michigan Consumer Sentiment': ['미시간대 소비자심리지수', 2, 'economic', '소비자 체감 경기.'],
+  'Michigan 1-Year Inflation Expectations': ['미시간대 1년 기대인플레이션', 2, 'economic', '소비자의 1년 기대 물가상승률.'],
+  'Durable Goods Orders': ['내구재 주문', 2, 'economic', '기업 설비투자·제조업 수요 지표.'],
+  'Core Durable Goods Orders': ['근원 내구재 주문 (운송 제외)', 2, 'economic', '운송장비 제외 내구재 주문.'],
+  'Industrial Production': ['산업생산', 2, 'economic', '제조·광업·유틸리티 생산.'],
+  'Housing Starts': ['주택착공', 1, 'economic', '신규 주택 착공 건수.'],
+  'Building Permits': ['건축허가', 1, 'economic', '신규 주택 건축허가 건수.'],
+  'Existing Home Sales': ['기존주택 판매', 1, 'economic', '기존 주택 거래량(연율).'],
+  'New Home Sales': ['신규주택 판매', 1, 'economic', '신규 주택 판매(연율).'],
+  'Pending Home Sales': ['잠정주택 판매', 1, 'economic', '계약 체결 기준 주택 판매.'],
+  'NY Empire State Manufacturing Index': ['뉴욕 연은 제조업지수', 1, 'economic', '뉴욕주 제조업 경기.'],
+  'Philadelphia Fed Manufacturing Index': ['필라델피아 연은 제조업지수', 2, 'economic', '필라델피아 지역 제조업 경기.'],
+  'Trade Balance': ['무역수지', 1, 'economic', '상품·서비스 수출입 차이.'],
+  'Nonfarm Productivity': ['비농업 생산성', 1, 'economic', '분기 노동생산성.'],
+  'Unit Labor Costs': ['단위노동비용', 1, 'economic', '생산 단위당 노동비용.'],
+  'Crude Oil Inventories': ['EIA 원유 재고', 1, 'economic', '주간 미국 원유 재고 변화.'],
+  '10-Year Note Auction': ['10년물 국채 입찰', 1, 'economic', '낙찰 금리.'],
+  '30-Year Bond Auction': ['30년물 국채 입찰', 1, 'economic', '낙찰 금리.'],
+};
+// Fed chair speeches ("Fed Chair Warsh Speaks") are kept too; other officials' speeches are skipped.
+const FED_CHAIR = /^Fed Chair (.+) Speaks$/;
+
+const econValue = (s) => { const t = String(s ?? '').replace(/&nbsp;/g, ' ').trim(); return t || null; };
+// New York's UTC offset in minutes at `ms` (e.g. -240 for EDT).
+const nyOffset = (ms) => {
+  const m = /GMT([+-]\d+)(?::(\d+))?/.exec(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' }).format(new Date(ms)));
+  return m ? Math.sign(+m[1]) * (Math.abs(+m[1]) * 60 + (+m[2] || 0)) : -300;
+};
+const FETCH_OFFSET = nyOffset(Date.now());
+// Nasdaq's listed date + time (at today's New York offset) → { date, time } in New York time of that day.
+function nyFromListed(date, time) {
+  if (!time) return { date, time: null };
+  const utc = Date.parse(`${date}T${time}:00Z`) - FETCH_OFFSET * 60e3;
+  return { date: nyDate(utc), time: nyTime(utc) };
+}
+
+async function economicDay(date) {
+  const j = await fetchJson(`https://api.nasdaq.com/api/calendar/economicevents?date=${date}`, NASDAQ_HEADERS);
+  const out = new Map(); // one event per name + time: Nasdaq lists MoM / YoY (or level / %) as separate rows
+  for (const r of j?.data?.rows || []) {
+    if (r.country !== 'United States') continue;
+    const name = String(r.eventName || '').trim();
+    const chair = FED_CHAIR.exec(name);
+    const meta = ECON_EVENTS[name] || (chair && [`연준 의장 연설 (${chair[1]})`, 2, 'fed', '연준 의장 공개 발언.']);
+    if (!meta) continue;
+    const listed = /^\d{2}:\d{2}$/.test(String(r.gmt || '').trim()) ? r.gmt.trim() : null;
+    const at = nyFromListed(date, listed);
+    const key = `${name}|${listed}`;
+    const ev = out.get(key) || { ...at, name, title: meta[0], importance: meta[1], type: meta[2], detail: meta[3], actual: [], consensus: [], previous: [] };
+    ev.actual.push(econValue(r.actual));
+    ev.consensus.push(econValue(r.consensus));
+    ev.previous.push(econValue(r.previous));
+    out.set(key, ev);
+  }
+  // Rows of one event are joined in Nasdaq's order (e.g. "0.3% / 3.1%"); a column with no values → null.
+  const join = (vals) => (vals.some((v) => v != null) ? vals.map((v) => v ?? '-').join(' / ') : null);
+  return [...out.values()].map((ev) => ({ ...ev, actual: join(ev.actual), consensus: join(ev.consensus), previous: join(ev.previous) }));
+}
+
+async function fetchEconomic() {
+  const today = nyDate(Date.now());
+  const from = addDaysKey(today, -14);
+  const to = addDaysKey(today, 28);
+  const dates = [];
+  for (let k = from; k <= to; k = addDaysKey(k, 1)) {
+    const dow = new Date(`${k}T12:00:00Z`).getUTCDay();
+    if (dow !== 0 && dow !== 6) dates.push(k);
+  }
+  const days = await mapLimit(dates, 4, economicDay, 150);
+  const failedDates = dates.filter((_, i) => !days[i].ok);
+  if (failedDates.length === dates.length) throw new Error(`all ${dates.length} calendar requests failed: ${days[0].error?.message}`);
+  // Dates that failed this time keep the previous snapshot's events.
+  const kept = (previousSnapshot.economic?.items || []).filter((ev) => failedDates.includes(ev.date));
+  const items = [...days.flatMap((d) => (d.ok ? d.value : [])), ...kept]
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.time).localeCompare(String(b.time)) || b.importance - a.importance);
+  return {
+    asOf: today,
+    source: 'Nasdaq',
+    url: 'https://www.nasdaq.com/market-activity/economic-calendar',
+    from,
+    to,
+    items,
+    ...(failedDates.length ? { note: `${failedDates.length}/${dates.length} calendar dates failed (${failedDates.join(', ')})` } : {}),
   };
 }
 
@@ -598,6 +728,7 @@ const SECTIONS = {
   fearGreed: fetchFearGreed,
   aaii: fetchAaiiWeekly,
   earnings: fetchEarnings,
+  economic: fetchEconomic,
   crypto: fetchCrypto,
   globalIndices: fetchGlobalIndices,
 };
@@ -626,6 +757,11 @@ function latestLabel(key, s) {
       const reported = s.items.filter((it) => it.epsActual != null).length;
       return `${s.items.length} items · ${reported} w/ actual · next: ${upcoming.join(', ')}`;
     }
+    case 'economic': {
+      const released = s.items.filter((ev) => ev.actual != null).length;
+      const next = s.items.filter((ev) => ev.date >= s.asOf && ev.actual == null && ev.importance === 3).slice(0, 3).map((ev) => `${ev.name} ${ev.date.slice(5)}`);
+      return `${s.items.length} US events · ${released} w/ actual · next: ${next.join(', ')}`;
+    }
     case 'globalIndices': {
       const pick = ['kospi', 'nikkei', 'stoxx600', 'sp500'].map((k) => s.items.find((it) => it.key === k)).filter(Boolean);
       const off = s.items.filter((it) => it.official).length;
@@ -652,7 +788,7 @@ async function main() {
     if (r.status === 'fulfilled') {
       data[key] = r.value;
       ok++;
-      summary.push({ section: key, status: r.value.reused ? 'ok (weekly, reused)' : r.value.note && key !== 'earnings' && key !== 'globalIndices' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
+      summary.push({ section: key, status: r.value.reused ? 'ok (weekly, reused)' : r.value.note && key !== 'earnings' && key !== 'economic' && key !== 'globalIndices' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
       return;
     }
     const message = r.reason?.message || String(r.reason);

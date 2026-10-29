@@ -303,7 +303,7 @@
           ${saved ? '<button type="button" id="fh-clear" class="text-xs text-rose-600 underline decoration-dotted dark:text-rose-400">저장된 키 삭제</button>' : ''}
           <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-slate-800/60">
             <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline dark:text-indigo-400">finnhub.io</a>에서 무료 키를 발급받을 수 있습니다.
-            실시간: 뉴스 · 실적 일정 · 실적 서프라이즈 · 지수 ETF 시세 (경제지표 일정은 샘플).<br>
+            실시간: 뉴스 · 실적 일정 · 실적 서프라이즈 · 지수 ETF 시세. 경제지표·실적 일정은 키 없이도 Nasdaq 스냅샷(약 15분 주기)으로 표시됩니다.<br>
             🔒 키는 이 브라우저(localStorage)에만 저장되고 Finnhub에만 전송됩니다. 화면·로그·캐시에 남기지 않으며 다른 서버로 보내지 않습니다.
             다만 브라우저 앱 특성상 이 기기에 접근할 수 있는 사람은 키를 볼 수 있으니, <b>공용 PC에서는 저장하지 말고</b> 무료 키만 사용하세요.
           </div>

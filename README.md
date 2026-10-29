@@ -83,13 +83,13 @@ js/
   views/*.js                   화면별 모듈: UMB.views.<route> = { render(container), unmount() }
   app.js                       해시 라우터, 헤더 시세 띠, 모달·토스트, 설정, 테마, 자동 갱신 타이머 (마지막에 로드)
 scripts/
-  fetch-market-data.mjs        금리·VIX·유가·공포탐욕·AAII·실적·비트코인·글로벌 지수 → js/marketData.js
+  fetch-market-data.mjs        금리·VIX·유가·공포탐욕·AAII·실적·경제지표 일정·비트코인·글로벌 지수 → js/marketData.js
   fetch-macro-data.mjs         재무부 곡선·FRED·ECB·환율·원자재·채권 ETF → js/macroData.js
   fetch-sector-data.mjs        섹터 ETF → js/sectorData.js
   fetch-semi-data.mjs          SOX 구성종목·반도체 종목·재무 → js/semiData.js
   restore-published-snapshots.mjs  (Actions) 배포 중인 최신 스냅샷을 "이전 값"으로 복원
   update-market-data.cmd       (로컬 Windows 예약 작업) 4개 수집 + 스냅샷만 커밋·push
-.github/workflows/refresh-data.yml   15분 주기 수집 + Pages 배포
+.github/workflows/refresh-data.yml   15분 주기 수집 + Pages 배포 (실행이 다음 실행을 예약하는 체인)
 logs/                          로컬 예약 작업 로그 (git 제외)
 ```
 
@@ -107,7 +107,7 @@ logs/                          로컬 예약 작업 로그 (git 제외)
 | 단계 | 방식 | 주기 | 대상 |
 | --- | --- | --- | --- |
 | ① 브라우저 실시간 | `js/live.js` (CNBC 시세), `js/api.js` (CoinGecko·업비트, Finnhub) | 1분 / 화면 복귀 / ⟳ | 글로벌 지수·지수 선물·VIX·미 국채 장중 금리·환율·원자재 선물·ETF·미국/일본/대만/홍콩/유럽 상장 종목, 비트코인, (키 입력 시) Finnhub 뉴스·실적·ETF 시세 |
-| ② 서버 스냅샷 | GitHub Actions가 `scripts/fetch-*.mjs` 실행 → Pages 배포(커밋 안 함) | 평일 15분, 주말 6시간 (+토 새벽·일 저녁) | 위 항목의 이력·기간 수익률·52주 범위·재무, 한국 상장 종목, CNN 공포탐욕, AAII, 재무부·FRED 금리, ECB, 실적 캘린더 |
+| ② 서버 스냅샷 | GitHub Actions가 `scripts/fetch-*.mjs` 실행 → Pages 배포(커밋 안 함) | 평일 15분, 주말 6시간 (+토 새벽·일 저녁) | 위 항목의 이력·기간 수익률·52주 범위·재무, 한국 상장 종목, CNN 공포탐욕, AAII, 재무부·FRED 금리, ECB, 실적·경제지표 캘린더(실제 EPS·실제치 포함) |
 | ③ 로컬 예약 작업 | Windows 작업 `USMarketBrief - Market Data`, 매일 07:00 KST | 1일 | ②와 같은 수집 + 스킬 전용 데이터(한국은행 ECOS 코스피·코스닥 공식 종가) → 4개 스냅샷 파일만 커밋·push |
 
 | 데이터 | 원천 |
@@ -120,8 +120,9 @@ logs/                          로컬 예약 작업 로그 (git 제외)
 | 글로벌 지수·환율·원자재·ETF·종목 | Yahoo Finance 차트/시세 (+ 실시간 CNBC) |
 | 연준 금리·TIPS·BEI·신용 스프레드·주요국 10년 | FRED (스킬 → 실패 시 공개 CSV 직접) |
 | SOX 구성종목 | Nasdaq Global Indexes |
-| 실적 일정 | Nasdaq 실적 캘린더(오늘 −14일 ~ +21일, 시총 $50B+ + `WATCHLIST`), Finnhub 키가 있으면 Finnhub 우선 |
-| 경제지표·FOMC·휴장 | 샘플 생성기(`mockData.js`/`data.js`) — Finnhub 경제 캘린더는 유료 |
+| 실적 일정·실제 EPS | Nasdaq 실적 캘린더(오늘 −14일 ~ +21일, 시총 $50B+ + `WATCHLIST`) — 행에 실제 EPS·서프라이즈가 들어오면 그대로 사용, 없으면 Nasdaq earnings-surprise로 보완. Finnhub 키가 있으면 Finnhub 일정 우선이되 Finnhub에 실제 EPS가 아직 없으면 스냅샷 값 사용 |
+| 경제지표·FOMC | Nasdaq 경제 캘린더(미국, 오늘 −14일 ~ +28일, 주요 지표만 한국어 제목·중요도 부여 — `ECON_EVENTS`) — 실제·예상·이전 값. 실제치는 발표 시각(ET)이 지난 뒤에만 표시 |
+| 휴장 | 규칙 기반 계산(`data.js`). 스냅샷이 없을 때만 경제지표·FOMC도 샘플 생성기 사용 |
 | 비트코인 | CoinGecko + 업비트(김치 프리미엄), 브라우저 실시간 |
 
 **실패·지연 처리**
@@ -139,6 +140,7 @@ logs/                          로컬 예약 작업 로그 (git 제외)
 
 - **GitHub Pages 소스는 "GitHub Actions"** 입니다. `master`에 push하면 워크플로가 수집 후 배포합니다(약 5분). 수동 실행: Actions → *Refresh market data* → *Run workflow*, 또는 `gh workflow run refresh-data.yml`.
 - 워크플로 파일을 push하려면 GitHub 토큰에 `workflow` 권한이 필요합니다(`gh auth refresh -h github.com -s workflow`).
-- 예약 워크플로는 저장소 활동이 60일 없으면 GitHub가 끕니다(로컬 07:00 커밋이 있으면 유지). GitHub 예약 실행은 수 분 늦게 시작될 수 있습니다.
+- GitHub 예약(cron) 실행은 부하 시 몇 시간씩 밀리거나 빠지므로, 워크플로의 `chain` 잡이 활성 시간대(평일·토 새벽·일 저녁 UTC)에 실행 시작 약 15분 뒤 `workflow_dispatch`로 다음 실행을 직접 예약합니다. 동시성 그룹 때문에 실행 1개 + 대기 1개만 존재해 체인이 늘어나지 않고, 체인이 끊기면 cron이 다시 시작합니다. 멈추려면 Actions에서 워크플로를 Disable 하세요.
+- 예약 워크플로는 저장소 활동이 60일 없으면 GitHub가 끕니다(로컬 07:00 커밋이 있으면 유지).
 - 로컬 예약 작업: 지금 실행 `Start-ScheduledTask -TaskName "USMarketBrief - Market Data"`, 해제 `Unregister-ScheduledTask -TaskName "USMarketBrief - Market Data" -Confirm:$false`, 로그 `logs/market-data.log`. `master`가 아니거나 수집 실패·변경 없음이면 커밋하지 않고, 스냅샷 4개 외 파일은 건드리지 않습니다.
 - 사용자 데이터(API 키 `umb.apiKey`, 관심종목 `umb.watchlist`, 즐겨찾기 `umb.favoriteEvents`, 테마 `umb.theme`)는 브라우저 localStorage에만 있습니다.

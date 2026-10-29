@@ -151,6 +151,9 @@
     // Real earnings calendar from the market snapshot (major companies) supersedes all sample earnings.
     const snap = snapshotEarnings();
     if (snap) out = [...out.filter((ev) => ev.type !== 'earnings'), ...snap];
+    // Real US economic calendar (indicators + Fed) supersedes the sample indicators and Fed events.
+    const econSnap = snapshotEconomic();
+    if (econSnap) out = [...out.filter((ev) => ev.type !== 'economic' && ev.type !== 'fed'), ...econSnap];
     return out.sort((a, b) => eventDate(a) - eventDate(b));
   }
 
@@ -180,6 +183,22 @@
         .filter(Boolean).join(' · '),
       forecast: usd(m.epsForecast), previous: usd(m.lastYearEPS), actual: usd(m.epsActual),
     }));
+  }
+
+  // ---- US economic calendar from js/marketData.js (Nasdaq: actual / consensus / previous) ----
+  // Nasdaq sometimes fills "actual" before the release (e.g. the rate decision equal to consensus), so
+  // the actual figure is shown only once the release time (ET) has passed.
+  function snapshotEconomic() {
+    const e = window.MARKET_DATA && window.MARKET_DATA.economic;
+    if (!e || !Array.isArray(e.items) || !e.items.length) return null;
+    const multi = (v) => v != null && v.includes(' / ');
+    return e.items.map((m) => {
+      const ev = { id: `econ-${m.name}-${m.date}-${m.time || 'day'}`, date: m.date, time: m.time || null, session: null,
+        type: m.type === 'fed' ? 'fed' : 'economic', importance: m.importance || 1, title: m.title,
+        detail: [m.detail, (multi(m.actual) || multi(m.consensus) || multi(m.previous)) && '여러 수치(전월비·전년비 등)는 Nasdaq 표기 순서'].filter(Boolean).join(' · '),
+        forecast: m.consensus || undefined, previous: m.previous || undefined };
+      return m.actual != null && eventDate(ev).getTime() <= Date.now() ? { ...ev, actual: m.actual } : ev;
+    });
   }
 
   // ---- This week's schedule from js/mockData.js (MOCK_ECONOMIC / MOCK_EARNINGS) ----

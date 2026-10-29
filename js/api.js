@@ -134,7 +134,8 @@
   }
 
   // Live-mode earnings. Inside Finnhub's queried range its real-time calendar is authoritative (date,
-  // session, estimate, actual); the Nasdaq snapshot only contributes company name and market cap.
+  // session, estimate, actual); the Nasdaq snapshot contributes company name, market cap and — when
+  // Finnhub has none yet — the actual EPS.
   // Outside that range — or when Finnhub returns nothing, which the free tier sometimes does — the
   // snapshot stays as is, so earnings never disappear. Sample (mock) earnings are dropped whenever
   // real data exists.
@@ -149,10 +150,12 @@
       const l = liveByTicker.get(e.ticker);
       const inRange = e.date >= from && e.date <= to;
       if (l && inRange) {
-        // Finnhub wins; keep the snapshot's richer descriptive fields.
+        // Finnhub wins; keep the snapshot's richer descriptive fields. Finnhub's free calendar often
+        // fills the actual EPS hours after Nasdaq, so a missing actual falls back to the snapshot's.
         liveByTicker.delete(e.ticker);
+        const actual = l.actual != null ? { actual: l.actual } : e.actual != null ? { actual: e.actual, surprisePct: e.surprisePct } : {};
         out.push({ ...l, company: e.company, marketCap: e.marketCap, title: e.title, detail: e.detail,
-          importance: Math.max(e.importance, l.importance), previous: e.previous });
+          importance: Math.max(e.importance, l.importance), previous: e.previous, session: l.session || e.session, ...actual });
       } else {
         out.push(e);
       }
@@ -162,7 +165,8 @@
 
   // Earnings Surprises (stock/earnings): last 4 quarters of { actual, estimate, period, surprisePercent }.
   // Matched to a reported event by fiscal period: the latest period ending before the report date
-  // (within ~4 months). Only reported events are looked up, most important first, cached 12h.
+  // (within 80 days, so a quarter not yet recorded never borrows the previous one). Only reported
+  // events are looked up, most important first, cached 12h.
   async function applySurprises(events) {
     const now = Date.now();
     const horizon = now - 14 * 86400e3;
@@ -179,7 +183,7 @@
       const match = rows
         .filter((r) => r.period && r.actual != null)
         .map((r) => ({ r, gap: reportTs - Date.parse(`${r.period}T00:00:00Z`) }))
-        .filter((x) => x.gap >= 0 && x.gap <= 125 * 86400e3)
+        .filter((x) => x.gap >= 0 && x.gap <= 80 * 86400e3)
         .sort((a, b) => a.gap - b.gap)[0];
       if (!match) return;
       const r = match.r;

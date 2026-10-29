@@ -3,7 +3,8 @@
 # the local 07:00 task still commits a daily copy. Each run first restores the newest published
 # snapshots so failed sections keep their latest values (scripts/restore-published-snapshots.mjs).
 #
-# Cron is UTC and GitHub may start scheduled runs several minutes late.
+# Cron is UTC and GitHub may start scheduled runs late or skip them, so the `chain` job re-dispatches
+# the workflow every ~15 minutes inside the windows below.
 #   Mon–Fri every 15 min   Asia, Europe and US pre-market → after-hours (00:00–24:00 UTC)
 #   Sat 00:00–00:45        tail of US Friday after-hours
 #   Sun 22:00–23:45        CME futures reopen
@@ -70,3 +71,31 @@ jobs:
           path: .
       - id: deploy
         uses: actions/deploy-pages@v4
+
+  # GitHub delays or drops scheduled runs under load (observed: hours apart instead of 15 min), so during
+  # the active windows above each run queues the next one itself about 15 minutes after it started.
+  # A workflow_dispatch made with GITHUB_TOKEN does start a new run. The concurrency group keeps at most
+  # one run plus one pending, so chains never multiply; the cron entries restart a broken chain.
+  chain:
+    needs: refresh-and-deploy
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+    steps:
+      - name: Queue the next run in ~15 minutes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          started=$(gh run view "$GITHUB_RUN_ID" --json createdAt --jq .createdAt)
+          wait=$(( 900 - ($(date -u +%s) - $(date -u -d "$started" +%s)) ))
+          if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
+          dow=$(date -u +%u); hour=$(date -u +%H)
+          if [ "$dow" -le 5 ] || { [ "$dow" -eq 6 ] && [ "$hour" = 00 ]; } || { [ "$dow" -eq 7 ] && [ "$hour" -ge 22 ]; }; then
+            gh workflow run refresh-data.yml --ref master
+            echo "queued next run"
+          else
+            echo "outside the active window; the 6-hourly cron takes over"
+          fi

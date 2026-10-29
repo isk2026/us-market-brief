@@ -33,7 +33,9 @@
     let html = '';
     if (state.source === 'sample') {
       html += `<div class="mb-4 flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
-        <span>ℹ</span><span class="flex-1">샘플 데이터 표시 중 — ⚙ 설정에서 Finnhub API 키를 입력하면 실시간 뉴스·실적 일정을 불러옵니다.</span>
+        <span>ℹ</span><span class="flex-1">${window.MARKET_DATA && window.MARKET_DATA.economic
+          ? '뉴스는 샘플 데이터 표시 중(경제지표·실적 일정은 Nasdaq 실제 데이터) — ⚙ 설정에서 Finnhub API 키를 입력하면 실시간 뉴스를 불러옵니다.'
+          : '샘플 데이터 표시 중 — ⚙ 설정에서 Finnhub API 키를 입력하면 실시간 뉴스·실적 일정을 불러옵니다.'}</span>
         <button data-action="settings" class="shrink-0 font-medium underline">설정 열기</button></div>`;
     }
     if (state.error) {
