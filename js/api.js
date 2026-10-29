@@ -1,8 +1,9 @@
 /*
- * Data loading. Without an API key the app runs on sample data; with a Finnhub key it pulls
- * live news, the earnings calendar (+ earnings surprises for reported companies) and ETF quotes
- * through the rate-limited, cached client in js/finnhub.js. Economic/Fed/holiday events always
- * come from the sample generator because Finnhub's economic calendar is a premium endpoint.
+ * Data loading. News comes from RSS (CNBC / MarketWatch live in the browser + the snapshot's
+ * Nasdaq feed); earnings and economic/Fed events from the Nasdaq calendars in js/marketData.js.
+ * With a Finnhub key it also pulls Finnhub news, the earnings calendar (+ earnings surprises) and
+ * ETF quotes through the rate-limited, cached client in js/finnhub.js. Sample data is used only
+ * where no real source loaded (holidays are computed by rule).
  */
 (function () {
   'use strict';
@@ -21,7 +22,7 @@
     'JPM', 'V', 'MA', 'LLY', 'UNH', 'XOM', 'WMT', 'NFLX', 'COST', 'ORCL']);
 
   const CATEGORY_RULES = [
-    ['fed', /\b(fed|fomc|powell|federal reserve|rate cuts?|rate hikes?|interest rates?|treasury yields?|yields?)\b/i],
+    ['fed', /\b(fed|fomc|powell|warsh|ecb|central banks?|federal reserve|rate cuts?|rate hikes?|interest rates?|treasury yields?|yields?)\b/i],
     ['earnings', /\b(earnings|quarterly|revenue|guidance|eps|profit|results|beats?|misses?)\b/i],
     ['tech', /\b(ai|chips?|semiconductors?|nvidia|apple|microsoft|google|alphabet|meta|tesla|software|cloud|tech)\b/i],
     ['energy', /\b(oil|crude|opec|natural gas|gold|copper|commodit(y|ies)|energy)\b/i],
@@ -68,6 +69,113 @@
     };
   }
 
+  // ---- Market news from RSS (no key needed) ----
+  // CNBC and MarketWatch allow cross-origin requests, so the browser reads them live; the snapshot
+  // (js/marketData.js `news`, rebuilt every ~15 min) adds Nasdaq's feed and covers failures.
+  // Keep in sync with NEWS_FEEDS in scripts/fetch-market-data.mjs.
+  const NEWS_FEEDS = [
+    { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', source: 'CNBC', hint: 'market' },
+    { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20409666', source: 'CNBC', hint: 'market' },
+    { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258', source: 'CNBC', hint: 'macro' },
+    { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135', source: 'CNBC', hint: 'earnings' },
+    { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910', source: 'CNBC', hint: 'tech' },
+    { url: 'https://feeds.content.dowjones.io/public/rss/mw_bulletins', source: 'MarketWatch', hint: 'market' },
+  ];
+  const NEWS_SKIP = /cnbc\.com\/(select|video|make-it)\//i;
+  const NEWS_MAX_AGE_MS = 3 * 86400e3;
+  const NEWS_LIVE_TTL_MS = 2 * 60e3;
+  // Company names in headlines → tickers (RSS items carry no symbols).
+  const NAME_TICKERS = [
+    [/\bapple\b/i, 'AAPL'], [/\bmicrosoft\b/i, 'MSFT'], [/\bnvidia\b/i, 'NVDA'], [/\b(alphabet|google)\b/i, 'GOOGL'],
+    [/\bamazon\b/i, 'AMZN'], [/\bmeta\b/i, 'META'], [/\btesla\b/i, 'TSLA'], [/\bbroadcom\b/i, 'AVGO'],
+    [/\bnetflix\b/i, 'NFLX'], [/\bjpmorgan\b/i, 'JPM'], [/\b(eli lilly|lilly)\b/i, 'LLY'], [/\bexxon\b/i, 'XOM'],
+    [/\bwalmart\b/i, 'WMT'], [/\boracle\b/i, 'ORCL'], [/\bamd\b/i, 'AMD'], [/\bintel\b/i, 'INTC'],
+    [/\bberkshire\b/i, 'BRK.B'], [/\bvisa\b/i, 'V'], [/\bmastercard\b/i, 'MA'], [/\bcostco\b/i, 'COST'],
+    [/\bunitedhealth\b/i, 'UNH'], [/\bmicron\b/i, 'MU'], [/\bpalantir\b/i, 'PLTR'], [/\bboeing\b/i, 'BA'],
+    [/\bcaterpillar\b/i, 'CAT'], [/\bmerck\b/i, 'MRK'], [/\bservicenow\b/i, 'NOW'], [/\b(tsmc|taiwan semiconductor)\b/i, 'TSM'],
+  ];
+  const tickersIn = (text) => NAME_TICKERS.filter(([re]) => re.test(text)).map(([, t]) => t);
+  const hashId = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+
+  function normalizeRss(n) {
+    const text = `${n.headline} ${n.summary || ''}`;
+    const sentences = String(n.summary || '').split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean).slice(0, 3);
+    const cat = classify(text);
+    const category = cat === 'market' ? n.hint || 'market' : cat;
+    const tickers = tickersIn(n.headline);
+    return {
+      id: `rss-${hashId(n.url)}`,
+      datetime: n.datetime,
+      headline: n.headline,
+      summary: sentences.length ? sentences : [n.headline],
+      source: n.source,
+      url: /^https?:\/\//i.test(n.url || '') ? n.url : '#',
+      importance: importanceOf(n.headline, category, tickers),
+      category,
+      sentiment: sentimentOf(text),
+      tickers,
+    };
+  }
+
+  async function rssFeed(feed) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(feed.url, { signal: ctrl.signal, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/xml');
+      const txt = (el, tag) => {
+        const raw = (el.getElementsByTagName(tag)[0] || {}).textContent || '';
+        // Descriptions may carry HTML; parse it inertly and keep only the text.
+        return (/[<&]/.test(raw) ? new DOMParser().parseFromString(raw, 'text/html').body.textContent : raw).replace(/\s+/g, ' ').trim();
+      };
+      return [...doc.getElementsByTagName('item')].map((it) => ({
+        headline: txt(it, 'title'), summary: txt(it, 'description'), url: txt(it, 'link'),
+        datetime: Date.parse(txt(it, 'pubDate')), source: feed.source, hint: feed.hint,
+      }));
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  let liveNews = { at: 0, items: [] };
+  // Live feeds (cached 2 min) + snapshot items, deduplicated by URL / headline, newest first.
+  async function loadRssNews() {
+    if (Date.now() - liveNews.at > NEWS_LIVE_TTL_MS) {
+      const results = await Promise.allSettled(NEWS_FEEDS.map(rssFeed));
+      const items = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+      if (items.length) liveNews = { at: Date.now(), items };
+      else console.warn('[UMB] live news feeds unavailable, showing snapshot');
+    }
+    const snap = (window.MARKET_DATA && window.MARKET_DATA.news && window.MARKET_DATA.news.items) || [];
+    const cutoff = Date.now() - NEWS_MAX_AGE_MS;
+    const seen = new Set();
+    const news = [...liveNews.items, ...snap]
+      .filter((n) => n.headline && /^https?:\/\//i.test(n.url || '') && !NEWS_SKIP.test(n.url)
+        && Number.isFinite(n.datetime) && n.datetime >= cutoff && n.datetime <= Date.now() + 3600e3)
+      .sort((a, b) => b.datetime - a.datetime)
+      .filter((n) => {
+        const keys = [n.url.split('?')[0], n.headline.toLowerCase()];
+        if (keys.some((k) => seen.has(k))) return false;
+        keys.forEach((k) => seen.add(k));
+        return true;
+      })
+      .slice(0, 100)
+      .map(normalizeRss);
+    return { news, live: liveNews.items.length > 0 && Date.now() - liveNews.at < 10 * 60e3 };
+  }
+
+  // Finnhub and RSS together: one entry per headline, newest first.
+  function mergeNews(a, b) {
+    const seen = new Set();
+    return [...a, ...b].sort((x, y) => y.datetime - x.datetime).filter((n) => {
+      const k = n.headline.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).slice(0, 120);
+  }
+
   function normalizeEarnings(rows) {
     const watch = new Set(state.watchlist);
     const sorted = [...rows].sort((a, b) => (b.revenueEstimate || 0) - (a.revenueEstimate || 0));
@@ -97,8 +205,13 @@
   // it only needs to return the Briefing shape documented in core.js.
   function buildBriefing() {
     const { CATEGORIES, formatDateKo } = window.UMB;
-    const spy = state.quotes.find((q) => q.symbol === 'SPY');
-    const qqq = state.quotes.find((q) => q.symbol === 'QQQ');
+    // Index moves from the market snapshot (+ live overlay); Finnhub ETF quotes only as a fallback,
+    // and never the sample quotes.
+    const indices = (state.market && !state.market.mock && state.market.globalIndices && state.market.globalIndices.items) || [];
+    const idx = (key, name) => { const i = indices.find((x) => x.key === key); return i && i.changePct != null ? { name, change: i.changePct } : null; };
+    const etf = (sym) => (state.source === 'live' ? state.quotes.find((q) => q.symbol === sym) : null);
+    const spy = idx('sp500', 'S&P 500') || etf('SPY');
+    const qqq = idx('nasdaq', '나스닥') || etf('QQQ');
     const pos = state.news.filter((n) => n.sentiment === 'positive').length;
     const neg = state.news.filter((n) => n.sentiment === 'negative').length;
     const tone = pos > neg * 1.3 ? 'positive' : neg > pos * 1.3 ? 'negative' : 'neutral';
@@ -296,6 +409,10 @@
     const snapshot = window.MARKET_DATA || window.MOCK_MARKET || null;
     state.market = snapshot ? { ...snapshot } : null;
     state.surpriseStats = null;
+    const rss = loadRssNews().catch((err) => {
+      console.warn('[UMB] news feeds failed', err && err.message);
+      return { news: [], live: false };
+    });
     try {
       const crypto = refreshCrypto();
       if (window.UMB.finnhub.hasKey()) await loadLive();
@@ -305,11 +422,20 @@
       // FinnhubError messages are Korean and never contain the key (see js/finnhub.js).
       console.error('[UMB] live load failed', err && err.code, err && err.message);
       useSample();
-      state.error = `실시간 데이터를 불러오지 못해 샘플 데이터를 표시합니다. ${err && err.code ? err.message : 'API 키와 네트워크를 확인하세요.'}`;
-    } finally {
-      state.loading = false;
-      state.updatedAt = Date.now();
+      state.error = `Finnhub 데이터를 불러오지 못해 기본 데이터를 표시합니다. ${err && err.code ? err.message : 'API 키와 네트워크를 확인하세요.'}`;
     }
+    // Real news (RSS) replaces the sample news, or is merged with Finnhub's; the briefing is then
+    // rebuilt from real headlines and index moves instead of the sample briefing.
+    const { news, live } = await rss;
+    if (news.length) {
+      state.news = state.source === 'live' ? mergeNews(state.news, news) : news;
+      state.briefing = buildBriefing();
+      state.newsSource = live ? 'rss' : 'snapshot';
+    } else {
+      state.newsSource = state.source === 'live' ? 'finnhub' : 'sample';
+    }
+    state.loading = false;
+    state.updatedAt = Date.now();
   }
 
   window.UMB.api = { load, refreshCrypto };

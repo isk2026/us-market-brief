@@ -77,13 +77,13 @@ js/
   marketData.js                ⚙ 생성 파일 — 시장 지표 스냅샷 (fetch-market-data.mjs)
   mockData.js                  샘플 뉴스·브리핑·경제지표·실적·시장 지표(MOCK_*)
   data.js                      샘플 데이터 → 앱 데이터 형식 변환 (UMB.sample)
-  api.js                       데이터 로딩 (샘플 ↔ Finnhub 실시간, 스냅샷 재로드, 비트코인 실시간) (UMB.api)
+  api.js                       데이터 로딩 (뉴스 RSS 실시간, Finnhub, 스냅샷 재로드, 비트코인 실시간) (UMB.api)
   live.js                      CNBC 실시간 시세 오버레이 (UMB.live)
   macroData.js / sectorData.js / semiData.js   ⚙ 생성 파일 — 각 탭 스냅샷 (탭을 열 때 지연 로드)
   views/*.js                   화면별 모듈: UMB.views.<route> = { render(container), unmount() }
   app.js                       해시 라우터, 헤더 시세 띠, 모달·토스트, 설정, 테마, 자동 갱신 타이머 (마지막에 로드)
 scripts/
-  fetch-market-data.mjs        금리·VIX·유가·공포탐욕·AAII·실적·경제지표 일정·비트코인·글로벌 지수 → js/marketData.js
+  fetch-market-data.mjs        금리·VIX·유가·공포탐욕·AAII·실적·경제지표 일정·뉴스(RSS)·비트코인·글로벌 지수 → js/marketData.js
   fetch-macro-data.mjs         재무부 곡선·FRED·ECB·환율·원자재·채권 ETF → js/macroData.js
   fetch-sector-data.mjs        섹터 ETF → js/sectorData.js
   fetch-semi-data.mjs          SOX 구성종목·반도체 종목·재무 → js/semiData.js
@@ -96,8 +96,8 @@ logs/                          로컬 예약 작업 로그 (git 제외)
 ### 런타임 흐름
 
 1. `index.html`이 스크립트를 순서대로 로드(매번 `?v=타임스탬프` 부착 → 캐시된 옛 파일과 섞이지 않음): `core → finnhub → marketData → mockData → data → api → live → views/* → app`.
-2. `app.js`가 `UMB.api.load()` 호출 → `state.market`(스냅샷 얕은 복사), 뉴스·일정·시세(Finnhub 키 있으면 실시간, 없으면 샘플) 채움 → `UMB.live.refresh()`로 실시간 시세 덮어쓰기 → 현재 라우트의 `view.render()`.
-3. 갱신 주기: 스냅샷 재로드 5분, 실시간 시세 1분, 비트코인 1분, 탭 복귀 시 즉시(10분 이상 지났으면 전체 재로드), ⟳ 버튼은 강제 갱신.
+2. `app.js`가 `UMB.api.load()` 호출 → `state.market`(스냅샷 얕은 복사), 뉴스(CNBC·MarketWatch RSS 실시간 + 스냅샷, 키가 있으면 Finnhub 뉴스 병합)·일정(Nasdaq 스냅샷)·시세 채움 → `UMB.live.refresh()`로 실시간 시세 덮어쓰기 → 현재 라우트의 `view.render()`.
+3. 갱신 주기: 스냅샷·뉴스 재로드 5분(뉴스 피드는 2분 캐시), 실시간 시세 1분, 비트코인 1분, 탭 복귀 시 즉시(10분 이상 지났으면 전체 재로드), ⟳ 버튼은 강제 갱신.
 4. 매크로·섹터·반도체 탭은 처음 열 때 `js/<name>Data.js`를 `<script>`로 지연 로드하고 4분 지나면 다시 읽습니다.
 
 ## 데이터
@@ -106,8 +106,8 @@ logs/                          로컬 예약 작업 로그 (git 제외)
 
 | 단계 | 방식 | 주기 | 대상 |
 | --- | --- | --- | --- |
-| ① 브라우저 실시간 | `js/live.js` (CNBC 시세), `js/api.js` (CoinGecko·업비트, Finnhub) | 1분 / 화면 복귀 / ⟳ | 글로벌 지수·지수 선물·VIX·미 국채 장중 금리·환율·원자재 선물·ETF·미국/일본/대만/홍콩/유럽 상장 종목, 비트코인, (키 입력 시) Finnhub 뉴스·실적·ETF 시세 |
-| ② 서버 스냅샷 | GitHub Actions가 `scripts/fetch-*.mjs` 실행 → Pages 배포(커밋 안 함) | 평일 15분, 주말 6시간 (+토 새벽·일 저녁) | 위 항목의 이력·기간 수익률·52주 범위·재무, 한국 상장 종목, CNN 공포탐욕, AAII, 재무부·FRED 금리, ECB, 실적·경제지표 캘린더(실제 EPS·실제치 포함) |
+| ① 브라우저 실시간 | `js/live.js` (CNBC 시세), `js/api.js` (CNBC·MarketWatch RSS, CoinGecko·업비트, Finnhub) | 1분(뉴스 5분) / 화면 복귀 / ⟳ | 글로벌 지수·지수 선물·VIX·미 국채 장중 금리·환율·원자재 선물·ETF·미국/일본/대만/홍콩/유럽 상장 종목, 뉴스, 비트코인, (키 입력 시) Finnhub 뉴스·실적·ETF 시세 |
+| ② 서버 스냅샷 | GitHub Actions가 `scripts/fetch-*.mjs` 실행 → Pages 배포(커밋 안 함) | 평일 15분, 주말 6시간 (+토 새벽·일 저녁) | 위 항목의 이력·기간 수익률·52주 범위·재무, 한국 상장 종목, CNN 공포탐욕, AAII, 재무부·FRED 금리, ECB, 실적·경제지표 캘린더(실제 EPS·실제치 포함), 뉴스(Nasdaq RSS 포함) |
 | ③ 로컬 예약 작업 | Windows 작업 `USMarketBrief - Market Data`, 매일 07:00 KST | 1일 | ②와 같은 수집 + 스킬 전용 데이터(한국은행 ECOS 코스피·코스닥 공식 종가) → 4개 스냅샷 파일만 커밋·push |
 
 | 데이터 | 원천 |
@@ -122,6 +122,7 @@ logs/                          로컬 예약 작업 로그 (git 제외)
 | SOX 구성종목 | Nasdaq Global Indexes |
 | 실적 일정·실제 EPS | Nasdaq 실적 캘린더(오늘 −14일 ~ +21일, 시총 $50B+ + `WATCHLIST`) — 행에 실제 EPS·서프라이즈가 들어오면 그대로 사용, 없으면 Nasdaq earnings-surprise로 보완. Finnhub 키가 있으면 Finnhub 일정 우선이되 Finnhub에 실제 EPS가 아직 없으면 스냅샷 값 사용 |
 | 경제지표·FOMC | Nasdaq 경제 캘린더(미국, 오늘 −14일 ~ +28일, 주요 지표만 한국어 제목·중요도 부여 — `ECON_EVENTS`) — 실제·예상·이전 값. 실제치는 발표 시각(ET)이 지난 뒤에만 표시 |
+| 뉴스 | CNBC(Top News·Markets·Economy·Earnings·Tech)·MarketWatch Bulletins RSS(브라우저 실시간) + Nasdaq Markets RSS(스냅샷), 최근 3일·중복 제거. 카테고리·심리·중요도·관련 종목은 헤드라인 키워드 규칙(`api.js`). Finnhub 키가 있으면 Finnhub 뉴스와 병합. 마켓 브리핑은 이 뉴스와 S&P 500·나스닥 등락으로 자동 생성. 피드가 모두 실패할 때만 샘플 뉴스 |
 | 휴장 | 규칙 기반 계산(`data.js`). 스냅샷이 없을 때만 경제지표·FOMC도 샘플 생성기 사용 |
 | 비트코인 | CoinGecko + 업비트(김치 프리미엄), 브라우저 실시간 |
 

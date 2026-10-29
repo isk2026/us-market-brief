@@ -176,8 +176,10 @@
 
   function renderSourceBadge() {
     const el = $('#source-badge');
-    el.textContent = state.loading ? '불러오는 중…' : state.source === 'live' ? '● 실시간 (Finnhub)' : '샘플 데이터';
-    el.className = 'hidden shrink-0 rounded-full px-2 py-1 text-xs font-medium md:inline ' + (state.source === 'live'
+    const real = state.source === 'live' || state.newsSource === 'rss' || state.newsSource === 'snapshot';
+    el.textContent = state.loading ? '불러오는 중…' : state.source === 'live' ? '● 실시간 (Finnhub)'
+      : state.newsSource === 'rss' ? '● 실시간 뉴스' : state.newsSource === 'snapshot' ? '뉴스 스냅샷' : '샘플 데이터';
+    el.className = 'hidden shrink-0 rounded-full px-2 py-1 text-xs font-medium md:inline ' + (real
       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
       : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300');
   }

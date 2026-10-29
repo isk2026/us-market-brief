@@ -47,7 +47,7 @@
 
 ## 3. 데이터·도메인 주의사항
 
-- **CORS:** Yahoo, Cboe, CNN, AAII, Nasdaq, FRED는 브라우저에서 직접 못 부른다 → 스크립트로만. 브라우저 직접 호출 가능: CNBC 시세(`quote.cnbc.com`), CoinGecko, 업비트, 미 재무부 CSV, ECB, Finnhub(키). 새 원천은 `Origin` 헤더를 넣은 요청으로 `Access-Control-Allow-Origin`을 먼저 확인.
+- **CORS:** Yahoo, Cboe, CNN, AAII, Nasdaq, FRED는 브라우저에서 직접 못 부른다 → 스크립트로만. 브라우저 직접 호출 가능: CNBC 시세(`quote.cnbc.com`), CNBC·MarketWatch RSS(Nasdaq RSS는 불가), CoinGecko, 업비트, 미 재무부 CSV, ECB, Finnhub(키). 새 원천은 `Origin` 헤더를 넣은 요청으로 `Access-Control-Allow-Origin`을 먼저 확인.
 - **CNBC 시세는 비공식 엔드포인트**다. 실패해도 앱이 스냅샷으로 정상 동작해야 한다. 한국 상장 종목(`.KS`)은 제공되지 않음. 심볼 매핑은 `js/live.js`의 `MAP`/`cnbcSymbol`.
 - **Yahoo 일봉은 거래일이 빠질 때가 있다**(예: 코스피 전일 누락 → 등락률 오류). 전일 종가는 가능하면 다른 원천(CNBC `previous_day_closing`, ECOS 공식 종가)으로 확인.
 - **FRED 공개 CSV**는 브라우저형 User-Agent에 응답이 멈춘다 → 도구형 UA(`us-market-brief/1.0 …`) 사용, id 여러 개를 한 번에 요청하면 ZIP으로 온다 → id별 요청.
@@ -56,7 +56,7 @@
 - **AAII는 주간 데이터**: 목~수 설문, 수요일 날짜로 목요일(미 동부) 발표. 이번 주 결과가 있으면 재조회하지 않음(`fetchAaiiWeekly`).
 - 한국은행 ECOS 공식 종가는 스킬로만 받는다 → Actions에서는 직전 값을 이어서 사용.
 - 시간대: 거래소 개장 판단·세션 날짜는 각 거래소 시간대(`Intl.DateTimeFormat` + `timeZone`)로 계산. `new Date('YYYY-MM-DD')`(UTC 자정) 대신 `T12:00:00Z`를 붙이거나 `U.parseKey` 사용.
-- **Nasdaq 경제 캘린더의 `gmt` 열은 GMT가 아니다**: 요청한 날의 뉴욕 UTC 오프셋으로 표시한 뉴욕 시각이라, 서머타임 전환 뒤 일정은 1시간 어긋난다 → `nyFromListed`로 변환. 또 발표 전인데 `actual`이 미리 채워진 경우가 있어(예: 금리 결정 = 예상치) 화면은 발표 시각이 지난 뒤에만 실제치를 보여준다(`data.js snapshotEconomic`).
+- **Nasdaq 경제 캘린더의 `gmt` 열은 GMT가 아니다**: 요청한 날의 뉴욕 UTC 오프셋으로 표시한 뉴욕 시각이라, 서머타임 전환 뒤 일정은 1시간 어긋난다 → `nyFromListed`로 변환. **`?date=D`는 D−1일의 일정을 돌려준다** → 일정일 + 1로 요청(금요일 일정은 토요일 요청). 또 발표 전인데 `actual`이 미리 채워진 경우가 있어(예: 금리 결정 = 예상치) 화면은 발표 시각이 지난 뒤에만 실제치를 보여준다(`data.js snapshotEconomic`).
 - **실제 EPS**는 Nasdaq 실적 캘린더 행(`eps`, `surprise`)이 가장 빠르다. 과거 날짜 행은 `time-not-supplied`라 세션(bmo/amc)은 직전 스냅샷 값을 유지한다. Finnhub 병합 시 Finnhub에 실제 EPS가 없으면 스냅샷 값을 지우지 않는다(`api.js mergeEarnings`).
 - 즐겨찾기는 이벤트 `id`로 저장되므로 id 형식(`earn-티커-날짜` 등)을 바꾸지 않는다.
 

@@ -200,7 +200,8 @@
     quotes: [],      // Quote[]
     briefing: null,  // Briefing | null
     market: null,    // MARKET_DATA snapshot (js/marketData.js) or MOCK_MARKET; see js/views/marketPanel.js
-    source: 'sample', // 'sample' | 'live'
+    source: 'sample', // 'sample' | 'live' (Finnhub key in use)
+    newsSource: 'sample', // 'rss' (live feeds) | 'snapshot' | 'finnhub' | 'sample'
     loading: false,
     error: null,
     updatedAt: null,

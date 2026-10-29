@@ -9,7 +9,8 @@
  * helper (scripts/market_data.py: U.S. Treasury, Cboe, FRED). If Python or the skill is missing,
  * or a call fails, the direct fetchers below are used instead. fearGreed (CNN) and aaii (AAII
  * Sentiment Survey) are not covered by the skill and are always fetched directly, as are the Nasdaq
- * earnings and US economic calendars (actual EPS / actual figures appear once released).
+ * earnings and US economic calendars (actual EPS / actual figures appear once released) and the
+ * market news RSS feeds (CNBC, MarketWatch, Nasdaq).
  * Override the helper location with MARKET_DATA_PY (and the interpreter with PYTHON).
  *
  * A failed section keeps the previous snapshot's value marked `stale: true`; nothing is ever fabricated.
@@ -504,6 +505,8 @@ async function fetchEarnings() {
 // Only notable US releases are kept. Nasdaq's "gmt" column is not GMT: it is New York time at the UTC
 // offset in effect on the request day (fetched in October, November's 08:30 EST releases show as 09:30),
 // so each time is shifted back to UTC with that offset and re-expressed in New York time for its date.
+// The `date` parameter is also off by one: ?date=D returns the events of D-1 (checked against the
+// Oct 28 FOMC decision and the Oct 29 GDP release), so each event day is requested as day + 1.
 // name → [title, importance 1–3, type, detail]
 const ECON_EVENTS = {
   'Fed Interest Rate Decision': ['FOMC 기준금리 결정', 3, 'fed', '연방공개시장위원회 기준금리(상단) 결정.'],
@@ -572,7 +575,7 @@ function nyFromListed(date, time) {
 }
 
 async function economicDay(date) {
-  const j = await fetchJson(`https://api.nasdaq.com/api/calendar/economicevents?date=${date}`, NASDAQ_HEADERS);
+  const j = await fetchJson(`https://api.nasdaq.com/api/calendar/economicevents?date=${addDaysKey(date, 1)}`, NASDAQ_HEADERS);
   const out = new Map(); // one event per name + time: Nasdaq lists MoM / YoY (or level / %) as separate rows
   for (const r of j?.data?.rows || []) {
     if (r.country !== 'United States') continue;
@@ -618,6 +621,71 @@ async function fetchEconomic() {
     to,
     items,
     ...(failedDates.length ? { note: `${failedDates.length}/${dates.length} calendar dates failed (${failedDates.join(', ')})` } : {}),
+  };
+}
+
+// ---------- market news (RSS) ----------
+// CNBC and MarketWatch feeds are also fetched live by the browser (they allow CORS, see js/api.js
+// NEWS_FEEDS); Nasdaq's feed is server-only. `hint` is the category used when the text matches none.
+const NEWS_FEEDS = [
+  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', source: 'CNBC', hint: 'market' },
+  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20409666', source: 'CNBC', hint: 'market' },
+  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258', source: 'CNBC', hint: 'macro' },
+  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135', source: 'CNBC', hint: 'earnings' },
+  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910', source: 'CNBC', hint: 'tech' },
+  { url: 'https://feeds.content.dowjones.io/public/rss/mw_bulletins', source: 'MarketWatch', hint: 'market' },
+  { url: 'https://www.nasdaq.com/feed/rssoutbound?category=Markets', source: 'Nasdaq', hint: 'market' },
+];
+const NEWS_MAX_AGE_MS = 3 * 86400e3;
+const NEWS_KEEP = 120;
+// Personal-finance / shopping sections that are not market news.
+const NEWS_SKIP = /cnbc\.com\/(select|video|make-it)\//i;
+
+const decodeXml = (s) => String(s ?? '')
+  .replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, '$1')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+  .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+  .replace(/&(quot|apos|lt|gt|nbsp);/g, (_, e) => ({ quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ' }[e]))
+  .replace(/&amp;/g, '&')
+  .replace(/\s+/g, ' ')
+  .trim();
+const xmlTag = (block, tag) => { const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i').exec(block); return m ? decodeXml(m[1]) : ''; };
+
+async function newsFeed(feed) {
+  const xml = await fetchText(feed.url, { Accept: 'application/rss+xml, application/xml, text/xml' });
+  return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)].map(([block]) => ({
+    headline: xmlTag(block, 'title'),
+    summary: xmlTag(block, 'description'),
+    url: xmlTag(block, 'link'),
+    datetime: Date.parse(xmlTag(block, 'pubDate')),
+    source: feed.source,
+    hint: feed.hint,
+  })).filter((n) => n.headline && /^https?:\/\//i.test(n.url) && Number.isFinite(n.datetime) && !NEWS_SKIP.test(n.url));
+}
+
+async function fetchNews() {
+  const results = await mapLimit(NEWS_FEEDS, 4, newsFeed);
+  const failed = NEWS_FEEDS.filter((_, i) => !results[i].ok).map((f) => `${f.source} ${new URL(f.url).search || f.url}`);
+  if (failed.length === NEWS_FEEDS.length) throw new Error(`all ${NEWS_FEEDS.length} feeds failed: ${results[0].error?.message}`);
+  const cutoff = Date.now() - NEWS_MAX_AGE_MS;
+  const seen = new Set();
+  const items = results.flatMap((r) => (r.ok ? r.value : []))
+    .filter((n) => n.datetime >= cutoff && n.datetime <= Date.now() + 3600e3)
+    .sort((a, b) => b.datetime - a.datetime)
+    .filter((n) => {
+      // Same story in several feeds: keep the first (newest) by URL or headline.
+      const keys = [n.url.split('?')[0], n.headline.toLowerCase()];
+      if (keys.some((k) => seen.has(k))) return false;
+      keys.forEach((k) => seen.add(k));
+      return true;
+    })
+    .slice(0, NEWS_KEEP);
+  return {
+    asOf: new Date().toISOString(),
+    source: [...new Set(NEWS_FEEDS.map((f) => f.source))].join(' · '),
+    items,
+    ...(failed.length ? { note: `${failed.length}/${NEWS_FEEDS.length} feeds failed (${failed.join(', ')})` } : {}),
   };
 }
 
@@ -729,6 +797,7 @@ const SECTIONS = {
   aaii: fetchAaiiWeekly,
   earnings: fetchEarnings,
   economic: fetchEconomic,
+  news: fetchNews,
   crypto: fetchCrypto,
   globalIndices: fetchGlobalIndices,
 };
@@ -762,6 +831,11 @@ function latestLabel(key, s) {
       const next = s.items.filter((ev) => ev.date >= s.asOf && ev.actual == null && ev.importance === 3).slice(0, 3).map((ev) => `${ev.name} ${ev.date.slice(5)}`);
       return `${s.items.length} US events · ${released} w/ actual · next: ${next.join(', ')}`;
     }
+    case 'news': {
+      const by = {};
+      s.items.forEach((n) => { by[n.source] = (by[n.source] || 0) + 1; });
+      return `${s.items.length} items (${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(', ')}) · latest ${new Date(s.items[0]?.datetime).toISOString().slice(11, 16)}Z`;
+    }
     case 'globalIndices': {
       const pick = ['kospi', 'nikkei', 'stoxx600', 'sp500'].map((k) => s.items.find((it) => it.key === k)).filter(Boolean);
       const off = s.items.filter((it) => it.official).length;
@@ -788,7 +862,7 @@ async function main() {
     if (r.status === 'fulfilled') {
       data[key] = r.value;
       ok++;
-      summary.push({ section: key, status: r.value.reused ? 'ok (weekly, reused)' : r.value.note && key !== 'earnings' && key !== 'economic' && key !== 'globalIndices' ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
+      summary.push({ section: key, status: r.value.reused ? 'ok (weekly, reused)' : r.value.note && !['earnings', 'economic', 'news', 'globalIndices'].includes(key) ? 'ok (fallback)' : 'ok', source: r.value.source, asOf: r.value.asOf, latest: latestLabel(key, r.value) });
       return;
     }
     const message = r.reason?.message || String(r.reason);
